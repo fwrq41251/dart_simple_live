@@ -32,6 +32,7 @@ class FollowUserItem extends StatelessWidget {
         item.face,
         width: 48,
         height: 48,
+        cacheWidth: 96,
         borderRadius: 24,
       ),
       title: Text.rich(
