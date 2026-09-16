@@ -52,6 +52,12 @@ jobs:
       - name: Enable Flutter Desktop
         run: flutter config --enable-macos-desktop
 
+      # 清理旧构建缓存
+      - name: Clean build cache
+        run: |
+          cd simple_live_app
+          flutter clean
+
       # 更新Flutter的packages
       - name: Restore packages
         run: |
