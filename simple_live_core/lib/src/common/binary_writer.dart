@@ -3,7 +3,10 @@ import 'dart:typed_data';
 class BinaryWriter {
   List<int> buffer;
   int position = 0;
+  final ByteData _scratch = ByteData(8);
+
   BinaryWriter(this.buffer);
+
   int get length => buffer.length;
 
   void writeBytes(List<int> list) {
@@ -12,38 +15,32 @@ class BinaryWriter {
   }
 
   void writeInt(int value, int len, {Endian endian = Endian.big}) {
-    var b = Uint8List(len).buffer;
-    var bytes = ByteData.view(b);
     if (len == 1) {
-      //写入byte
-      bytes.setUint8(0, value.toUnsigned(8));
+      _scratch.setUint8(0, value.toUnsigned(8));
     }
     if (len == 2) {
-      bytes.setInt16(0, value, endian);
+      _scratch.setInt16(0, value, endian);
     }
     if (len == 4) {
-      bytes.setInt32(0, value, endian);
+      _scratch.setInt32(0, value, endian);
     }
     if (len == 8) {
-      bytes.setInt64(0, value, endian);
+      _scratch.setInt64(0, value, endian);
     }
 
-    buffer.addAll(bytes.buffer.asUint8List());
+    buffer.addAll(_scratch.buffer.asUint8List(0, len));
     position += len;
   }
 
   void writeDouble(double value, int len, {Endian endian = Endian.big}) {
-    var b = Uint8List(len).buffer;
-    var bytes = ByteData.view(b);
-
     if (len == 4) {
-      bytes.setFloat32(0, value, endian);
+      _scratch.setFloat32(0, value, endian);
     }
     if (len == 8) {
-      bytes.setFloat64(0, value, endian);
+      _scratch.setFloat64(0, value, endian);
     }
 
-    buffer.addAll(bytes.buffer.asUint8List());
+    buffer.addAll(_scratch.buffer.asUint8List(0, len));
     position += len;
   }
 }
@@ -68,15 +65,8 @@ class BinaryReader {
   /// 返回整数
   int readInt(int len, {Endian endian = Endian.big}) {
     var result = 0;
-    // if (len == 1) {
-    //   result = buffer[position];
-    //   position += len;
-    //   return result;
-    // }
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
-    var byteBuffer = bytes.buffer;
-    var data = ByteData.view(byteBuffer);
+    var data = ByteData.view(
+        buffer.buffer, buffer.offsetInBytes + position, len);
     if (len == 1) {
       result = data.getUint8(0);
     }
@@ -121,8 +111,7 @@ class BinaryReader {
   /// [len] 指定长度
   /// 返回字节数组
   Uint8List readBytes(int len) {
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
+    var bytes = buffer.sublist(position, position + len);
     position += len;
     return bytes;
   }
@@ -133,10 +122,8 @@ class BinaryReader {
   /// 返回浮点数
   double readFloat(int len, {Endian endian = Endian.big}) {
     var result = 0.0;
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
-    var byteBuffer = bytes.buffer;
-    var data = ByteData.view(byteBuffer);
+    var data = ByteData.view(
+        buffer.buffer, buffer.offsetInBytes + position, len);
     if (len == 4) {
       result = data.getFloat32(0, endian);
     }

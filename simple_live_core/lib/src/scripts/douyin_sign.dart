@@ -10648,42 +10648,47 @@ function getMSSDKSignature(msStub, userAgent) {
 ''';
 
   static const String defaultUserAgent = DouyinSite.kDefaultUserAgent;
-  static String getAbogusUrl(String url, String userAgent) {
-    JsRuntime flutterJs = JsRuntime(
+
+  static JsRuntime? _abogusRuntime;
+  static JsRuntime get _abogusJs {
+    _abogusRuntime ??= JsRuntime(
       memoryLimit: 4 * 1024 * 1024,
       maxStackSize: 64 * 1024,
-    );
+    )..eval(kABogus);
+    return _abogusRuntime!;
+  }
+
+  static JsRuntime? _msSdkRuntime;
+  static JsRuntime get _msSdkJs {
+    _msSdkRuntime ??= JsRuntime(
+      memoryLimit: 4 * 1024 * 1024,
+      maxStackSize: 128 * 1024,
+    )..eval(kWebMsSDK);
+    return _msSdkRuntime!;
+  }
+
+  static String getAbogusUrl(String url, String userAgent) {
+    final flutterJs = _abogusJs;
     final msToken = generateMsToken(107);
     var params = ('$url&msToken=$msToken').split('?')[1];
     var query = params.contains("?") ? params.split("?")[1] : params;
-    var jsCode = kABogus;
-    flutterJs.eval(jsCode);
-    // 执行getABogus函数
     var aBogus = flutterJs.eval("getABogus('$query', '$userAgent')");
-    flutterJs.dispose();
     var newUrl =
         '$url&msToken=${Uri.encodeComponent(msToken)}&a_bogus=${Uri.encodeComponent(aBogus)}';
     return newUrl;
   }
 
   static String getSignature(String roomId, String uniqueId) {
-    JsRuntime flutterJs = JsRuntime(
-      memoryLimit: 4 * 1024 * 1024,
-      maxStackSize: 128 * 1024,
-    );
-
-    flutterJs.eval(kWebMsSDK);
+    final flutterJs = _msSdkJs;
     var msStub = getMsStub(roomId, uniqueId);
     var signature = flutterJs.eval(
       "getMSSDKSignature('$msStub','$defaultUserAgent')",
     );
-    // 如果signature中包含-或=，重新生成
     while (signature.contains('-') || signature.contains('=')) {
       signature = flutterJs.eval(
         "getMSSDKSignature('$msStub','$defaultUserAgent')",
       );
     }
-    flutterJs.dispose();
     return signature;
   }
 
