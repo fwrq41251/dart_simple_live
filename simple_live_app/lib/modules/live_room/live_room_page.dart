@@ -468,10 +468,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             Expanded(
               child: TabBarView(
                 children: [
-                  Obx(
-                    () => Stack(
-                      children: [
-                        ListView.separated(
+                  Stack(
+                    children: [
+                      Obx(
+                        () => ListView.separated(
                           controller: controller.scrollController,
                           separatorBuilder: (_, i) => Obx(
                             () => SizedBox(
@@ -488,7 +488,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                             return buildMessageItem(item);
                           },
                         ),
-                        Visibility(
+                      ),
+                      Obx(
+                        () => Visibility(
                           visible: controller.disableAutoScroll.value,
                           child: Positioned(
                             right: 12,
@@ -503,8 +505,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                   if (controller.site.id == Constant.kBiliBili)
                     buildSuperChats(),
