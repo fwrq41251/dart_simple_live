@@ -7,6 +7,7 @@ import './tars_struct.dart';
 class BinaryWriter {
   List<int> buffer;
   int position = 0;
+  final ByteData _scratch = ByteData(8);
 
   BinaryWriter(this.buffer);
 
@@ -18,38 +19,32 @@ class BinaryWriter {
   }
 
   void writeInt(int value, int len) {
-    var b = Uint8List(len).buffer;
-    var bytes = ByteData.view(b);
     if (len == 1) {
-      //写入byte
-      bytes.setUint8(0, value.toUnsigned(8));
+      _scratch.setUint8(0, value.toUnsigned(8));
     }
     if (len == 2) {
-      bytes.setInt16(0, value, Endian.big);
+      _scratch.setInt16(0, value, Endian.big);
     }
     if (len == 4) {
-      bytes.setInt32(0, value, Endian.big);
+      _scratch.setInt32(0, value, Endian.big);
     }
     if (len == 8) {
-      bytes.setInt64(0, value, Endian.big);
+      _scratch.setInt64(0, value, Endian.big);
     }
 
-    buffer.addAll(bytes.buffer.asUint8List());
+    buffer.addAll(_scratch.buffer.asUint8List(0, len));
     position += len;
   }
 
   void writeDouble(double value, int len) {
-    var b = Uint8List(len).buffer;
-    var bytes = ByteData.view(b);
-
     if (len == 4) {
-      bytes.setFloat32(0, value, Endian.big);
+      _scratch.setFloat32(0, value, Endian.big);
     }
     if (len == 8) {
-      bytes.setFloat64(0, value, Endian.big);
+      _scratch.setFloat64(0, value, Endian.big);
     }
 
-    buffer.addAll(bytes.buffer.asUint8List());
+    buffer.addAll(_scratch.buffer.asUint8List(0, len));
     position += len;
   }
 }
@@ -194,11 +189,11 @@ class TarsOutputStream {
     if (bytes.length > 255) {
       writeHead(TarsStructType.STRING4.index, tag);
       bw.writeInt(bytes.length, 4);
-      bw.writeBytes(Uint8List.fromList(bytes));
+      bw.writeBytes(bytes);
     } else {
       writeHead(TarsStructType.STRING1.index, tag);
       bw.writeInt(bytes.length, 1);
-      bw.writeBytes(Uint8List.fromList(bytes));
+      bw.writeBytes(bytes);
     }
   }
 
