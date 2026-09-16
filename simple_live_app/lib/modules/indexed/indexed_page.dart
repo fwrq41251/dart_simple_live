@@ -61,8 +61,8 @@ class IndexedPage extends GetView<IndexedController> {
               () => NavigationBar(
                 selectedIndex: controller.index.value,
                 onDestinationSelected: controller.setIndex,
-                height: 56,
-                labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+                height: 64,
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
                 destinations: controller.items
                     .map(
                       (item) => NavigationDestination(

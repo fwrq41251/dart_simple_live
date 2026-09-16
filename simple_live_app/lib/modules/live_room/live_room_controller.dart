@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
@@ -101,7 +102,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   /// 直播间加载失败
   var loadError = false.obs;
-  Error? error;
+  Object? error;
 
   // 开播时长状态变量
   var liveDuration = "00:00:00".obs;
@@ -155,7 +156,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       if (countdown.value <= 0) {
         timer = Timer(const Duration(seconds: 10), () async {
           await WakelockPlus.disable();
-          exit(0);
+          SystemNavigator.pop();
         });
         autoExitTimer?.cancel();
         var delay = await Utils.showAlertDialog("定时关闭已到时,是否延迟关闭?",
@@ -168,7 +169,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         } else {
           delayAutoExit.value = false;
           await WakelockPlus.disable();
-          exit(0);
+          SystemNavigator.pop();
         }
       }
     });
@@ -335,7 +336,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       Log.logPrint(e);
       //SmartDialog.showToast(e.toString());
       loadError.value = true;
-      error = e as Error;
+      error = e;
     } finally {
       SmartDialog.dismiss(status: SmartStatus.loading);
     }
@@ -565,9 +566,32 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
 
     var id = "${site.id}_$roomId";
+    var user = FollowUser(
+      id: id,
+      roomId: roomId,
+      siteId: site.id,
+      userName: detail.value?.userName ?? "",
+      face: detail.value?.userAvatar ?? "",
+      addTime: DateTime.now(),
+    );
     DBService.instance.deleteFollow(id);
     followed.value = false;
     EventBus.instance.emit(Constant.kUpdateFollow, id);
+
+    ScaffoldMessenger.of(Get.context!).showSnackBar(
+      SnackBar(
+        content: Text("已取消关注 ${user.userName}"),
+        action: SnackBarAction(
+          label: "撤销",
+          onPressed: () {
+            DBService.instance.addFollow(user);
+            followed.value = true;
+            EventBus.instance.emit(Constant.kUpdateFollow, id);
+          },
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   void share() {
