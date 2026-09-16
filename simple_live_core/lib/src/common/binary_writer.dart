@@ -68,15 +68,8 @@ class BinaryReader {
   /// 返回整数
   int readInt(int len, {Endian endian = Endian.big}) {
     var result = 0;
-    // if (len == 1) {
-    //   result = buffer[position];
-    //   position += len;
-    //   return result;
-    // }
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
-    var byteBuffer = bytes.buffer;
-    var data = ByteData.view(byteBuffer);
+    var data = ByteData.view(
+        buffer.buffer, buffer.offsetInBytes + position, len);
     if (len == 1) {
       result = data.getUint8(0);
     }
@@ -121,8 +114,7 @@ class BinaryReader {
   /// [len] 指定长度
   /// 返回字节数组
   Uint8List readBytes(int len) {
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
+    var bytes = buffer.sublist(position, position + len);
     position += len;
     return bytes;
   }
@@ -133,10 +125,8 @@ class BinaryReader {
   /// 返回浮点数
   double readFloat(int len, {Endian endian = Endian.big}) {
     var result = 0.0;
-    var bytes =
-        Uint8List.fromList(buffer.getRange(position, position + len).toList());
-    var byteBuffer = bytes.buffer;
-    var data = ByteData.view(byteBuffer);
+    var data = ByteData.view(
+        buffer.buffer, buffer.offsetInBytes + position, len);
     if (len == 4) {
       result = data.getFloat32(0, endian);
     }
