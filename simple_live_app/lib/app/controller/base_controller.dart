@@ -10,7 +10,7 @@ import 'package:get/get.dart';
 
 class BaseController extends GetxController {
   /// 加载中，更新页面
-  var pageLoadding = false.obs;
+  var pageLoading = false.obs;
 
   /// 加载中,不会更新页面
   var loadding = false;
@@ -74,7 +74,7 @@ class BasePageController<T> extends BaseController {
       pageError.value = false;
       pageEmpty.value = false;
       notLogin.value = false;
-      pageLoadding.value = currentPage == 1;
+      pageLoading.value = currentPage == 1;
 
       var result = await getData(currentPage, pageSize);
       //是否可以加载更多
@@ -98,7 +98,7 @@ class BasePageController<T> extends BaseController {
       handleError(e, showPageError: currentPage == 1);
     } finally {
       loadding = false;
-      pageLoadding.value = false;
+      pageLoading.value = false;
     }
   }
 

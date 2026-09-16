@@ -8,7 +8,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/modules/search/douyin/douyin_search_controller.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/widgets/keep_alive_wrapper.dart';
-import 'package:simple_live_app/widgets/status/app_loadding_widget.dart';
+import 'package:simple_live_app/widgets/status/app_loading_widget.dart';
 
 class DouyinSearchView extends StatelessWidget {
   const DouyinSearchView({Key? key}) : super(key: key);
@@ -79,8 +79,8 @@ class DouyinSearchView extends StatelessWidget {
             ),
           Obx(
             () => Visibility(
-              visible: controller.pageLoadding.value,
-              child: const AppLoaddingWidget(),
+              visible: controller.pageLoading.value,
+              child: const AppLoadingWidget(),
             ),
           ),
         ],

@@ -45,11 +45,11 @@ class DouyinSearchController extends BaseController {
   }
 
   void onLoadStop(InAppWebViewController controller, Uri? uri) async {
-    pageLoadding.value = false;
+    pageLoading.value = false;
   }
 
   void onLoadStart(InAppWebViewController controller, Uri? uri) async {
-    pageLoadding.value = true;
+    pageLoading.value = true;
   }
 
   Future<bool?> onCreateWindow(InAppWebViewController controller,
