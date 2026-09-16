@@ -239,10 +239,8 @@ class BiliBiliDanmaku implements LiveDanmaku {
   }
 
   int readInt(List<int> buffer, int start, int len) {
-    var bytes =
-        Uint8List.fromList(buffer.getRange(start, start + len).toList());
-    var byteBuffer = bytes.buffer;
-    var data = ByteData.view(byteBuffer);
+    var data = ByteData.view(
+        Uint8List.fromList(buffer).buffer, start, len);
     var result = 0;
 
     if (len == 1) {
