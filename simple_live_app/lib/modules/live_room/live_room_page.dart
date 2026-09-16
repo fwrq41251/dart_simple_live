@@ -56,7 +56,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   Text(
                     controller.error?.toString() ?? "未知错误",
                     textAlign: TextAlign.center,
-                    maxLines: 1,
+                    maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
@@ -274,10 +274,27 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         Obx(
           () => Visibility(
             visible: !controller.liveStatus.value,
-            child: const Center(
-              child: Text(
-                "未开播",
-                style: TextStyle(fontSize: 16, color: Colors.white),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.tv_off_outlined,
+                    color: Colors.grey,
+                    size: 64,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "未开播",
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    onPressed: controller.refreshRoom,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text("刷新"),
+                  ),
+                ],
               ),
             ),
           ),

@@ -32,7 +32,7 @@ class SearchListView extends StatelessWidget {
                 mainAxisSpacing: 12,
                 crossAxisSpacing: 12,
                 crossAxisCount: roomRowCount,
-                showPageLoadding: true,
+                showPageLoading: true,
                 itemBuilder: (_, i) {
                   var item = controller.list[i] as LiveRoomItem;
                   return LiveRoomCard(controller.site, item);

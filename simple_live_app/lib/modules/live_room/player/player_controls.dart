@@ -150,6 +150,7 @@ Widget buildFullControls(
                         controller.exitFull();
                       }
                     },
+                    tooltip: "返回",
                     icon: const Icon(
                       Icons.arrow_back,
                       color: Colors.white,
@@ -170,6 +171,7 @@ Widget buildFullControls(
                     onPressed: () {
                       controller.saveScreenshot();
                     },
+                    tooltip: "截图",
                     icon: const Icon(
                       Icons.camera_alt_outlined,
                       color: Colors.white,
@@ -180,6 +182,7 @@ Widget buildFullControls(
                     onPressed: () {
                       showFollowUser(controller);
                     },
+                    tooltip: "关注列表",
                     icon: const Icon(
                       Remix.play_list_2_line,
                       color: Colors.white,
@@ -192,6 +195,7 @@ Widget buildFullControls(
                       onPressed: () {
                         controller.enablePIP();
                       },
+                      tooltip: "画中画",
                       icon: const Icon(
                         Icons.picture_in_picture,
                         color: Colors.white,
@@ -203,6 +207,7 @@ Widget buildFullControls(
                     onPressed: () {
                       showPlayerSettings(controller);
                     },
+                    tooltip: "设置",
                     icon: const Icon(
                       Icons.more_horiz,
                       color: Colors.white,
@@ -246,6 +251,7 @@ Widget buildFullControls(
                     onPressed: () {
                       controller.refreshRoom();
                     },
+                    tooltip: "刷新",
                     icon: const Icon(
                       Remix.refresh_line,
                       color: Colors.white,
@@ -256,6 +262,7 @@ Widget buildFullControls(
                     child: IconButton(
                       onPressed: () => controller.showDanmakuState.value =
                           !controller.showDanmakuState.value,
+                      tooltip: "打开弹幕",
                       icon: const ImageIcon(
                         AssetImage('assets/icons/icon_danmaku_open.png'),
                         size: 24,
@@ -268,6 +275,7 @@ Widget buildFullControls(
                     child: IconButton(
                       onPressed: () => controller.showDanmakuState.value =
                           !controller.showDanmakuState.value,
+                      tooltip: "关闭弹幕",
                       icon: const ImageIcon(
                         AssetImage('assets/icons/icon_danmaku_close.png'),
                         size: 24,
@@ -279,6 +287,7 @@ Widget buildFullControls(
                     onPressed: () {
                       showDanmakuSettings(controller);
                     },
+                    tooltip: "弹幕设置",
                     icon: const ImageIcon(
                       AssetImage('assets/icons/icon_danmaku_setting.png'),
                       size: 24,

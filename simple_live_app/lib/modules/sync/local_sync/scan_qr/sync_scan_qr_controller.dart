@@ -9,7 +9,7 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/routes/route_path.dart';
 
-class SyncScanQRControlelr extends BaseController {
+class SyncScanQRController extends BaseController {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? qrController;
   StreamSubscription<Barcode>? barcodeStreamSubscription;
