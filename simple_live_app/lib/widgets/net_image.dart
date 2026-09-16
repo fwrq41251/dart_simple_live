@@ -7,11 +7,15 @@ class NetImage extends StatelessWidget {
   final double? height;
   final BoxFit? fit;
   final double borderRadius;
+  final int? cacheWidth;
+  final int? cacheHeight;
   const NetImage(this.picUrl,
       {this.width,
       this.height,
       this.fit = BoxFit.cover,
       this.borderRadius = 0,
+      this.cacheWidth,
+      this.cacheHeight,
       Key? key})
       : super(key: key);
 
@@ -35,6 +39,8 @@ class NetImage extends StatelessWidget {
         fit: fit,
         height: height,
         width: width,
+        cacheWidth: cacheWidth,
+        cacheHeight: cacheHeight,
         shape: BoxShape.rectangle,
         borderRadius: BorderRadius.circular(borderRadius),
         loadStateChanged: (e) {

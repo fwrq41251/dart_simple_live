@@ -316,6 +316,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 controller.detail.value?.userAvatar ?? "",
                 width: 48,
                 height: 48,
+                cacheWidth: 96,
                 borderRadius: 24,
               ),
             ),

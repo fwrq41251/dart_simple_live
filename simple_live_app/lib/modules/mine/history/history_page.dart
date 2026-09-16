@@ -57,6 +57,7 @@ class HistoryPage extends GetView<HistoryController> {
                 item.face,
                 width: 48,
                 height: 48,
+                cacheWidth: 96,
                 borderRadius: 24,
               ),
               title: Text(item.userName),

@@ -51,6 +51,7 @@ class SearchListView extends StatelessWidget {
                       item.avatar,
                       width: 48,
                       height: 48,
+                      cacheWidth: 96,
                       borderRadius: 24,
                     ),
                     title: Text(item.userName),

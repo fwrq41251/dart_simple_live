@@ -70,6 +70,7 @@ class _SuperChatCardState extends State<SuperChatCard> {
                     widget.message.face,
                     width: 48,
                     height: 48,
+                    cacheWidth: 96,
                     borderRadius: 36,
                   ),
                   AppStyle.hGap12,
