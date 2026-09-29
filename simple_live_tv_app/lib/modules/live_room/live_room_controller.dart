@@ -200,7 +200,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
   }
 
-  void getPlayUrl() async {
+  Future<bool> getPlayUrl({bool notifyError = true}) async {
+    if (qualites.isEmpty ||
+        currentQuality < 0 ||
+        currentQuality >= qualites.length) {
+      if (notifyError) {
+        SmartDialog.showToast("无法读取播放清晰度");
+      }
+      return false;
+    }
     playUrls.clear();
     currentQualityInfo.value = qualites[currentQuality].quality;
     currentLineInfo.value = "";
@@ -208,8 +216,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     var playUrl = await site.liveSite
         .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
     if (playUrl.urls.isEmpty) {
-      SmartDialog.showToast("无法读取播放地址");
-      return;
+      if (notifyError) {
+        SmartDialog.showToast("无法读取播放地址");
+      }
+      return false;
     }
     playUrls.value = playUrl.urls;
     playHeaders = playUrl.headers;
@@ -218,6 +228,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     //重置错误次数
     mediaErrorRetryCount = 0;
     setPlayer();
+    return true;
   }
 
   void changePlayLine(int index) {
@@ -259,7 +270,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     Log.d("播放结束");
     // 遍历线路，如果全部链接都断开就是直播结束了
     if (playUrls.length - 1 == currentLineIndex) {
-      liveStatus.value = false;
+      // 地址失效与真正下播在这里无法区分，先重新获取地址重试。
+      // 只有重新获取后仍然失败（_maxFreshUrlAttempts 次用尽），才判定直播结束。
+      retryWithFreshUrls("播放结束");
     } else {
       changePlayLine(currentLineIndex + 1);
 
@@ -270,6 +283,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   int mediaErrorRetryCount = 0;
   @override
   void mediaError(String error) async {
+    super.mediaError(error);
     if (mediaErrorRetryCount < 2) {
       Log.d("播放失败，尝试第${mediaErrorRetryCount + 1}次刷新");
       if (mediaErrorRetryCount == 1) {
@@ -283,12 +297,69 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
 
     if (playUrls.length - 1 == currentLineIndex) {
-      errorMsg.value = "播放失败";
-      SmartDialog.showToast("播放失败:$error");
+      // 所有线路都失败，播放地址很可能已失效（斗鱼等平台的地址带时效鉴权）。
+      // 重新获取地址再试，而不是直接判定直播结束。
+      retryWithFreshUrls("播放失败:$error");
     } else {
       //currentLineIndex += 1;
       //setPlayer();
       changePlayLine(currentLineIndex + 1);
+    }
+  }
+
+  /// 重试计数器用尽后，重新获取播放地址。
+  ///
+  /// 各平台的播放地址通常带时效性鉴权参数，长时间播放后失效是正常现象。
+  /// 此时复用旧地址重试必然再次失败，必须重新向平台请求。
+  /// 重新请求仍拿不到地址，才说明直播确实结束了。
+  bool _fetchingFreshUrls = false;
+  int _freshUrlAttempts = 0;
+  static const int _maxFreshUrlAttempts = 3;
+
+  void retryWithFreshUrls(String failMessage) async {
+    // 并发保护：error/completed 事件可能连续触发
+    if (_fetchingFreshUrls) {
+      return;
+    }
+    _fetchingFreshUrls = true;
+    try {
+      _freshUrlAttempts += 1;
+      Log.d("播放地址可能已失效，重新获取（第$_freshUrlAttempts/$_maxFreshUrlAttempts 次）");
+      if (_freshUrlAttempts > 1) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      bool ok;
+      try {
+        ok = await getPlayUrl(notifyError: false);
+      } catch (e) {
+        // 重新请求地址失败（房间已下播时平台接口会报错），判定直播结束
+        Log.logPrint(e);
+        ok = false;
+      }
+      if (!ok) {
+        // 重新请求也拿不到地址，判定直播结束
+        _freshUrlAttempts = 0;
+        mediaErrorRetryCount = 0;
+        liveStatus.value = false;
+        return;
+      }
+      if (_freshUrlAttempts >= _maxFreshUrlAttempts) {
+        // 反复失效，不再无限重试
+        _freshUrlAttempts = 0;
+        errorMsg.value = failMessage;
+        SmartDialog.showToast(failMessage);
+      }
+    } finally {
+      _fetchingFreshUrls = false;
+    }
+  }
+
+  @override
+  void onPlayingChanged(bool playing) {
+    if (playing) {
+      // 恢复正常播放，重置所有重试计数
+      mediaErrorRetryCount = 0;
+      _freshUrlAttempts = 0;
     }
   }
 

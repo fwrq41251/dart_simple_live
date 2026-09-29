@@ -235,6 +235,7 @@ class PlayerController extends BaseController
   StreamSubscription? _widthSubscription;
   StreamSubscription? _heightSubscription;
   StreamSubscription? _logSubscription;
+  StreamSubscription? _playingSubscription;
 
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
@@ -244,6 +245,10 @@ class PlayerController extends BaseController
       }
       //SmartDialog.showToast(event);
       mediaError(event);
+    });
+
+    _playingSubscription = player.stream.playing.listen((event) {
+      onPlayingChanged(event);
     });
 
     _completedSubscription = player.stream.completed.listen((event) {
@@ -276,11 +281,15 @@ class PlayerController extends BaseController
     _widthSubscription?.cancel();
     _heightSubscription?.cancel();
     _logSubscription?.cancel();
+    _playingSubscription?.cancel();
   }
 
   void mediaEnd() {}
 
   void mediaError(String error) {}
+
+  /// 播放状态变化。子类可覆盖以在恢复播放时重置重试计数等状态。
+  void onPlayingChanged(bool playing) {}
 
   @override
   void onClose() async {
