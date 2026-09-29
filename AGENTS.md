@@ -11,6 +11,31 @@ This file applies to the whole repository. The repository contains four Dart pro
 
 The two clients and the console use `simple_live_core` through a relative path dependency. When changing a public core API, parser, model, or protocol implementation, check every consumer that is affected.
 
+## Upstream sync
+
+This repository is a fork of `xiaoyaocz/dart_simple_live`; the remote `upstream`
+is that project and `origin` is the fork. Track **`upstream/dev`**, never
+`upstream/master`:
+
+- `upstream/dev` is the development line and receives every release.
+- `upstream/master` is the release line. Upstream merges `dev` into it only at
+  release time, so it lags by however long the gap between releases is. A branch
+  cut from it silently misses everything released since. This fork's original
+  baseline, `ba828e6`, sat on the release line and was seven months and three
+  releases behind before the first real sync.
+- Merge upstream in; do not rebase, so shared history stays intact:
+  `git fetch upstream --tags && git merge upstream/dev`.
+- After merging, re-check the fork's build workarounds: the `auto_orientation_v2`
+  and `dynamic_color` version pins, the `flutter clean` step in the dev
+  workflows, and the `android/build.gradle.kts` override. These have historically
+  duplicated fixes that upstream went on to make itself, so drop any that
+  upstream now covers.
+
+Fork releases are tagged `fork_v*` (app) and `fork_tv_v*` (TV), never `dev_v*` or
+`dev_tv_v*`, so they cannot collide with upstream tags of the same name. The dev
+workflows check out `${{ github.ref_name }}`, so a pushed tag builds the commit
+it points at rather than whatever the branch happens to be.
+
 ## Toolchain
 
 - Flutter is pinned to `3.47.1` with FVM in both Flutter projects.
