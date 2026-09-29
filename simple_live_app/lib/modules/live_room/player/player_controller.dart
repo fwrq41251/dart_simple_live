@@ -692,6 +692,7 @@ class PlayerController extends BaseController
         WakelockPlus.enable();
         Log.d("Playing");
       }
+      onPlayingChanged(event);
     });
 
     _completedSubscription = player.stream.completed.listen((event) {
@@ -733,6 +734,9 @@ class PlayerController extends BaseController
   void mediaError(String error) {
     WakelockPlus.disable();
   }
+
+  /// 播放状态变化。子类可覆盖以在恢复播放时重置重试计数等状态。
+  void onPlayingChanged(bool playing) {}
 
   void showDebugInfo() {
     Utils.showBottomSheet(
