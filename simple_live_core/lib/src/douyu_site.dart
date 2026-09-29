@@ -15,6 +15,7 @@ import 'package:simple_live_core/src/model/live_search_result.dart';
 import 'package:simple_live_core/src/model/live_room_detail.dart';
 import 'package:simple_live_core/src/model/live_play_quality.dart';
 import 'package:simple_live_core/src/model/live_category_result.dart';
+import 'package:simple_live_core/src/model/live_replay.dart';
 import 'package:html_unescape/html_unescape.dart';
 import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 
@@ -384,6 +385,211 @@ class DouyuSite implements LiveSite {
   }) {
     //尚不支持
     return Future.value([]);
+  }
+
+  @override
+  bool get supportReplay => true;
+
+  static const String _kReplayUserAgent =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.51";
+
+  /// 房间号 -> 主播的 hash 形式 up_id。
+  ///
+  /// 斗鱼回放接口只接受 hash 形式的 up_id（如 XrZwYgYJaAbK），
+  /// betard 里的 owner_uid 是纯数字，用它会返回空列表。
+  /// 搜索接口的 homeUrl（douyuapp://userHomePage?id=<hash>）带有该值。
+  Future<String?> getReplayUpId(String roomId) async {
+    var did = generateRandomString(32);
+    var result = await HttpClient.instance.getJson(
+      "https://www.douyu.com/japi/search/api/searchUser",
+      queryParameters: {
+        "kw": roomId,
+        "page": 1,
+        "pageSize": 10,
+      },
+      header: {
+        'User-Agent': _kReplayUserAgent,
+        'referer': 'https://www.douyu.com/search/',
+        'Cookie': 'dy_did=$did;acf_did=$did',
+      },
+    );
+
+    if (result["error"] != 0) {
+      throw Exception(result["msg"]);
+    }
+
+    // 搜索结果是模糊匹配，必须按 rid 精确匹配，否则会拿到无关主播
+    for (var item in (result["data"]?["relateUser"] ?? [])) {
+      var anchor = item["anchorInfo"];
+      if (anchor == null) {
+        continue;
+      }
+      if (anchor["rid"]?.toString() != roomId) {
+        continue;
+      }
+      var homeUrl = anchor["homeUrl"]?.toString() ?? "";
+      return RegExp(r'id=([A-Za-z0-9]+)').firstMatch(homeUrl)?.group(1);
+    }
+    return null;
+  }
+
+  @override
+  Future<LiveReplayListResult> getReplayList({
+    required String roomId,
+    int page = 1,
+  }) async {
+    var upId = await getReplayUpId(roomId);
+    if (upId == null) {
+      // 搜不到主播（房间不存在/已注销）时视为无回放
+      return LiveReplayListResult(count: 0, items: []);
+    }
+
+    var result = await HttpClient.instance.getJson(
+      "https://v.douyu.com/wgapi/vod/center/authorShowVideoList",
+      queryParameters: {
+        "up_id": upId,
+        "page": page,
+        "limit": 20,
+      },
+      header: {
+        'user-agent': _kReplayUserAgent,
+        'referer': 'https://v.douyu.com/',
+      },
+    );
+
+    if (result["error"] != 0) {
+      throw Exception(result["msg"]);
+    }
+
+    var data = result["data"] ?? {};
+    var items = <LiveReplaySession>[];
+    for (var session in (data["list"] ?? [])) {
+      var videos = <LiveReplayItem>[];
+      for (var v in (session["video_list"] ?? [])) {
+        videos.add(LiveReplayItem(
+          hashId: v["hash_id"]?.toString() ?? "",
+          title: v["title"]?.toString() ?? "",
+          cover: v["video_pic"]?.toString() ?? "",
+          duration: int.tryParse(v["video_duration"]?.toString() ?? "") ?? 0,
+          strDuration: v["video_str_duration"]?.toString() ?? "",
+          startTime: int.tryParse(v["start_time"]?.toString() ?? "") ?? 0,
+          viewNum: int.tryParse(v["view_num"]?.toString() ?? "") ?? 0,
+          pointId: int.tryParse(v["point_id"]?.toString() ?? "") ?? 0,
+        ));
+      }
+      items.add(LiveReplaySession(
+        showId: int.tryParse(session["show_id"]?.toString() ?? "") ?? 0,
+        title: session["title"]?.toString() ?? "",
+        time: session["time"]?.toString() ?? "",
+        dateFormat: session["date_format"]?.toString() ?? "",
+        timeFormat: session["time_format"]?.toString() ?? "",
+        items: videos,
+      ));
+    }
+
+    return LiveReplayListResult(
+      count: int.tryParse(data["count"]?.toString() ?? "") ?? 0,
+      items: items,
+    );
+  }
+
+  @override
+  Future<LiveReplayUrl> getReplayUrl({
+    required String roomId,
+    required String hashId,
+  }) async {
+    var html = await HttpClient.instance.getText(
+      "https://v.douyu.com/show/$hashId",
+      queryParameters: {},
+      header: {'user-agent': _kReplayUserAgent},
+    );
+
+    var room = _parseReplayPageData(html);
+    if (room == null) {
+      throw Exception("无法解析回放页面");
+    }
+
+    var vid = room["vid"]?.toString() ?? "";
+    var pointId = room["point_id"]?.toString() ?? "";
+
+    // 回放页的签名函数与直播间相同（ub98484234），复用 DouyuSign。
+    // 注意：需要传入含该函数的 <script> 内容，而不是整页 HTML。
+    var script = _extractSignScript(html);
+    if (script == null) {
+      throw Exception("无法解析回放签名脚本");
+    }
+    var sign = DouyuSign.getSign(script, pointId);
+
+    var result = await HttpClient.instance.postJson(
+      "https://v.douyu.com/wgapi/vodnc/front/stream/getStreamUrlWeb",
+      data: "$sign&vid=$vid",
+      header: {
+        'user-agent': _kReplayUserAgent,
+        'referer': 'https://v.douyu.com/show/$hashId',
+      },
+      formUrlEncoded: true,
+    );
+
+    if (result["error"] != 0) {
+      throw Exception(result["msg"]);
+    }
+
+    var qualities = <LiveReplayQuality>[];
+    var thumbVideo = result["data"]?["thumb_video"];
+    if (thumbVideo is Map) {
+      for (var key in thumbVideo.keys) {
+        var item = thumbVideo[key];
+        var url = item["url"]?.toString() ?? "";
+        if (url.isEmpty) {
+          continue;
+        }
+        qualities.add(LiveReplayQuality(
+          quality: key.toString(),
+          name: item["name"]?.toString() ?? key.toString(),
+          url: url,
+        ));
+      }
+    }
+
+    return LiveReplayUrl(qualities: qualities);
+  }
+
+  /// 从回放页提取 window.$DATA 中的 ROOM 节点。
+  ///
+  /// $DATA 是 JS 对象字面量（键无引号），需要先转成合法 JSON。
+  Map? _parseReplayPageData(String html) {
+    var match = RegExp(r'window\.\$DATA\s*=\s*(\{.*?\});', dotAll: true)
+        .firstMatch(html);
+    if (match == null) {
+      return null;
+    }
+    var jsonText = match.group(1)!.replaceAllMapped(
+          RegExp(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:'),
+          (m) => '${m[1]}"${m[2]}":',
+        );
+    try {
+      var data = jsonDecode(jsonText);
+      if (data is Map) {
+        var room = data["ROOM"];
+        return room is Map ? room : null;
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  /// 提取含 ub98484234 签名函数的 <script> 内容
+  String? _extractSignScript(String html) {
+    for (var m
+        in RegExp(r'<script[^>]*>(.*?)</script>', dotAll: true).allMatches(html)) {
+      var content = m.group(1) ?? "";
+      if (content.contains("ub98484234")) {
+        return content;
+      }
+    }
+    return null;
   }
 }
 

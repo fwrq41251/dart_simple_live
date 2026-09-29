@@ -781,4 +781,23 @@ class DouyinSite implements LiveSite {
     return int.tryParse(stringBuffer.toString()) ??
         Random().nextInt(1000000000);
   }
+
+  @override
+  bool get supportReplay => false;
+
+  @override
+  Future<LiveReplayListResult> getReplayList({
+    required String roomId,
+    int page = 1,
+  }) {
+    return Future.value(LiveReplayListResult(count: 0, items: []));
+  }
+
+  @override
+  Future<LiveReplayUrl> getReplayUrl({
+    required String roomId,
+    required String hashId,
+  }) {
+    return Future.value(LiveReplayUrl(qualities: []));
+  }
 }

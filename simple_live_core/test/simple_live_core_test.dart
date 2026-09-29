@@ -130,6 +130,56 @@ void testSite(LiveSite site) async {
   }, timeout: const Timeout(Duration(seconds: 40)));
 }
 
+
+/// 斗鱼回放链路测试（真实网络）
+/// 覆盖：房间号 -> up_id、回放列表、回放播放地址
+void testDouyuReplay() {
+  final site = DouyuSite();
+  // 实测有回放的直播间
+  const roomId = "9999";
+  String? upId;
+  LiveReplayListResult? list;
+
+  test('getReplayUpId', () async {
+    upId = await site.getReplayUpId(roomId);
+    expect(upId, isNotNull);
+    expect(upId, isNotEmpty);
+    print('up_id = $upId');
+  });
+
+  test('getReplayList', () async {
+    if (upId == null) {
+      upId = await site.getReplayUpId(roomId);
+    }
+    list = await site.getReplayList(roomId: roomId);
+    expect(list, isNotNull);
+    print('回放场次数 = ${list!.count}, 本页 = ${list!.items.length}');
+    if (list!.items.isNotEmpty) {
+      final first = list!.items.first;
+      expect(first.items, isNotEmpty);
+      expect(first.items.first.hashId, isNotEmpty);
+      print('首场: ${first.time} / ${first.title}');
+    }
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('getReplayUrl', () async {
+    if (list == null || list!.items.isEmpty) {
+      list = await site.getReplayList(roomId: roomId);
+    }
+    if (list == null || list!.items.isEmpty) {
+      return; // 该房间暂无回放
+    }
+    final item = list!.items.first.items.first;
+    final url = await site.getReplayUrl(roomId: roomId, hashId: item.hashId);
+    expect(url, isNotNull);
+    expect(url.qualities, isNotEmpty);
+    for (final q in url.qualities) {
+      expect(q.url, isNotEmpty);
+      print('  [${q.quality}] ${q.name}');
+    }
+  }, timeout: const Timeout(Duration(seconds: 60)));
+}
+
 void main() {
   CoreLog.requestLogType = RequestLogType.short;
 
@@ -139,6 +189,10 @@ void main() {
 
   group('douyu tests', () {
     testSite(DouyuSite());
+  });
+
+  group('douyu replay tests', () {
+    testDouyuReplay();
   });
 
   group('huya tests', () {
