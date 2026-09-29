@@ -13,6 +13,7 @@ import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
+import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
@@ -822,6 +823,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 controller.refreshRoom();
               },
             ),
+            // 仅支持回放的平台显示（当前为斗鱼）
+            if (controller.site.liveSite.supportReplay)
+              ListTile(
+                leading: const Icon(Icons.history),
+                title: const Text("查看回放"),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Get.back();
+                  AppNavigator.toReplayList(
+                    site: controller.site,
+                    roomId: controller.roomId,
+                  );
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.play_circle_outline),
               trailing: const Icon(Icons.chevron_right),

@@ -55,6 +55,26 @@ class AppNavigator {
     });
   }
 
+  /// 跳转至回放列表
+  static void toReplayList({required Site site, required String roomId}) {
+    Get.toNamed(RoutePath.kReplayList, arguments: site, parameters: {
+      "roomId": roomId,
+    });
+  }
+
+  /// 跳转至回放播放
+  static void toReplayDetail({
+    required Site site,
+    required String roomId,
+    required dynamic item,
+  }) {
+    Get.toNamed(RoutePath.kReplayDetail, arguments: {
+      "site": site,
+      "roomId": roomId,
+      "item": item,
+    });
+  }
+
   /// 跳转至哔哩哔哩登录
   static Future toBiliBiliLogin() async {
     if (Platform.isAndroid || Platform.isIOS) {

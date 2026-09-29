@@ -6,6 +6,10 @@ import 'package:simple_live_app/modules/category/detail/category_detail_page.dar
 import 'package:simple_live_app/modules/indexed/indexed_controller.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/live_room_page.dart';
+import 'package:simple_live_app/modules/replay/replay_controller.dart';
+import 'package:simple_live_app/modules/replay/replay_list_controller.dart';
+import 'package:simple_live_app/modules/replay/replay_list_page.dart';
+import 'package:simple_live_app/modules/replay/replay_page.dart';
 import 'package:simple_live_app/modules/settings/follow_settings_page.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_config_page.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_controller.dart';
@@ -102,6 +106,29 @@ class AppPages {
         () => LiveRoomController(
           pSite: Get.arguments,
           pRoomId: Get.parameters["roomId"] ?? "",
+        ),
+      ),
+    ),
+    //回放列表
+    GetPage(
+      name: RoutePath.kReplayList,
+      page: () => const ReplayListPage(),
+      binding: BindingsBuilder.put(
+        () => ReplayListController(
+          pSite: Get.arguments,
+          pRoomId: Get.parameters["roomId"] ?? "",
+        ),
+      ),
+    ),
+    //回放播放
+    GetPage(
+      name: RoutePath.kReplayDetail,
+      page: () => const ReplayPage(),
+      binding: BindingsBuilder.put(
+        () => ReplayController(
+          pSite: Get.arguments["site"],
+          pRoomId: Get.arguments["roomId"],
+          pItem: Get.arguments["item"],
         ),
       ),
     ),
