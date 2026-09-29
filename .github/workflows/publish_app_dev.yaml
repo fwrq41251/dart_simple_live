@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "dev_v*"
+      - "fork_v*"
 
 env:
   JAVA_VERSION: "17"
@@ -25,7 +26,7 @@ jobs:
       # 签出代码
       - uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: ${{ github.ref_name }}
 
       # device_info_plus 12.4.0 使用 iOS 26.1 SDK 新增的 isiOSAppOnVision API。
       # macos-15-intel 默认使用 Xcode 16.4，因此显式选择 runner 已安装的新版本。
@@ -169,7 +170,7 @@ jobs:
       # 签出代码
       - uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: ${{ github.ref_name }}
       # 设置Flutter环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -219,7 +220,7 @@ jobs:
       # 签出代码
       - uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: ${{ github.ref_name }}
       # 设置Flutter环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
