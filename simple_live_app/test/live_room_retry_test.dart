@@ -1,9 +1,13 @@
 // 验证重试逻辑：播放地址失效 vs 房间确实下播
+// 对应修复：重试计数用尽后重新获取播放地址，而不是直接判定未开播。
+// ignore_for_file: must_call_super
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
+import 'package:get/get.dart';
+import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_core/simple_live_core.dart';
+import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
 /// 假站点：urlsAvailable=false 模拟"重新取地址也拿不到"（房间已下播）
 class FakeSite extends LiveSite {
@@ -66,10 +70,10 @@ TestController build(FakeSite fake) {
   c.currentQuality = 0;
   // 模拟正在播放中
   c.liveStatus.value = true;
-  // 走到"重试次数已用尽"的兜底分支（真实场景由前面的重试累积而来）
-  c.mediaErrorRetryCount = 2;
   c.playUrls.value = ['http://old/1.flv', 'http://old/2.flv'];
   c.currentLineIndex = 1; // 最后一条线路
+  // 走到"重试次数已用尽"的兜底分支（真实场景由前面的重试累积而来）
+  c.mediaErrorRetryCount = 2;
   return c;
 }
 
@@ -77,12 +81,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    // WakelockPlus.disable() 在测试环境无平台实现会抛异常，
-    // 会中断 mediaEnd/mediaError，这里 mock 掉。
-    // WakelockPlus.disable() 在测试环境无平台实现会抛异常并中断
-    // mediaEnd/mediaError，这里替换掉平台实现。
+    // WakelockPlus 在测试环境无平台实现会抛异常并中断 mediaEnd/mediaError
     WakelockPlusPlatformInterface.instance = _NoopWakelock();
+    // onWSMessage 读取 AppSettingsController.shieldList，
+    // 用跳过 Hive 初始化的子类注册，避免依赖本地存储。
+    Get.put<AppSettingsController>(_StubSettings());
   });
+
+  tearDown(Get.reset);
 
   test('地址失效但平台仍给地址：重新获取成功，不误判未开播', () async {
     var fake = FakeSite(urlsAvailable: true);
@@ -121,14 +127,32 @@ void main() {
   test('播放恢复时重置重试计数', () async {
     var fake = FakeSite(urlsAvailable: true);
     var c = build(fake);
-    c.mediaErrorRetryCount = 2;
 
     c.onPlayingChanged(true);
 
     expect(c.mediaErrorRetryCount, 0);
   });
-}
 
+  test('上滚暂停自动滚动时，聊天列表仍有绝对上限', () {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+    // 模拟用户上滚过：自动滚动已关闭，原逻辑不再裁剪
+    c.disableAutoScroll.value = true;
+    c.liveStatus.value = false; // 跳过弹幕渲染副作用
+
+    for (var i = 0; i < 1200; i++) {
+      c.onWSMessage(LiveMessage(
+        type: LiveMessageType.chat,
+        userName: 'u',
+        message: 'msg$i',
+        color: LiveMessageColor.white,
+      ));
+    }
+
+    expect(c.messages.length, lessThanOrEqualTo(500),
+        reason: '上滚状态下列表不应无限增长');
+  });
+}
 
 /// 测试用 wakelock 实现
 class _NoopWakelock extends WakelockPlusPlatformInterface {
@@ -138,4 +162,12 @@ class _NoopWakelock extends WakelockPlusPlatformInterface {
   Future<void> toggle({required bool enable}) async {}
   @override
   Future<bool> get enabled async => false;
+}
+
+/// 跳过 Hive 初始化的设置控制器（shieldList 默认为空）。
+/// 测试替身故意不调用 super.onInit()（它会读取 Hive 本地存储），
+/// 因此本文件关闭 must_call_super。
+class _StubSettings extends AppSettingsController {
+  @override
+  void onInit() {}
 }

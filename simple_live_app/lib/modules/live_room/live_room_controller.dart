@@ -63,6 +63,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 聊天信息
   RxList<LiveMessage> messages = RxList<LiveMessage>();
 
+  /// 聊天列表绝对上限。上滚暂停自动滚动时不裁剪，但超过此值强制裁剪，
+  /// 避免长时间挂机导致列表无限增长。
+  static const int _maxMessages = 500;
+
   /// 清晰度数据
   RxList<LivePlayQuality> qualites = RxList<LivePlayQuality>();
 
@@ -207,6 +211,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (msg.type == LiveMessageType.chat) {
       if (messages.length > 200 && !disableAutoScroll.value) {
         messages.removeAt(0);
+      }
+      // 上滚时不裁剪是为了避免列表内容在用户阅读时跳动，
+      // 但必须有绝对上限，否则长时间挂机会无限增长。
+      // 裁剪发生在 add 之前，故用 >= 保证最终长度不超过 _maxMessages。
+      if (messages.length >= _maxMessages) {
+        messages.removeRange(0, messages.length - _maxMessages + 1);
       }
 
       // 关键词屏蔽检查
