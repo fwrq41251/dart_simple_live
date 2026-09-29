@@ -1023,7 +1023,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 错误信息：
 ${error?.toString()}
 ----------------
-${error?.stackTrace}''');
+''');
     SmartDialog.showToast("已复制错误信息");
   }
 
