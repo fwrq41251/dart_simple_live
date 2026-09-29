@@ -1,0 +1,57 @@
+{
+  "error": 0,
+  "msg": "请求正常",
+  "data": {
+    "timestamp": 7200,
+    "thumb_video": {
+      "1440p60a": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/1440p60a_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=de64eef44fbd1014c2ba9dfa6d0433ce&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "9338300092",
+        "bit_rate": 10059424,
+        "name": "原画2K60",
+        "stream_type": "1440p60a",
+        "level": 20,
+        "stream_format": "264",
+        "now_free": 1,
+        "has_pms": 0
+      },
+      "normal": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/normal_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=213f80f0b18cb29bce0b36cc96bd7b1c&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "2015174068",
+        "bit_rate": 2125899,
+        "name": "标清480P",
+        "stream_type": "normal",
+        "level": 5,
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      },
+      "high": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/high_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=9566a15ce8a1fa49dd5857eead91860c&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "2934104344",
+        "bit_rate": 3124890,
+        "name": "高清720P",
+        "stream_type": "high",
+        "level": 10,
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      },
+      "1080p60": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/1080p60_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=02d1863e7243c228c2d5e44881f44be3&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "7509260124",
+        "bit_rate": 8070837,
+        "name": "高清1080P60",
+        "stream_type": "1080p60",
+        "level": 15,
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      }
+    },
+    "p2pmeta": {
+      "p2p": 0
+    },
+    "cdn": "hw"
+  }
+}
