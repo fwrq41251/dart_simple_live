@@ -666,6 +666,24 @@ class HuyaSite implements LiveSite {
     //尚不支持
     return Future.value([]);
   }
+  @override
+  bool get supportReplay => false;
+
+  @override
+  Future<LiveReplayListResult> getReplayList({
+    required String roomId,
+    int page = 1,
+  }) {
+    return Future.value(LiveReplayListResult(count: 0, items: []));
+  }
+
+  @override
+  Future<LiveReplayUrl> getReplayUrl({
+    required String roomId,
+    required String hashId,
+  }) {
+    return Future.value(LiveReplayUrl(qualities: []));
+  }
 }
 
 class HuyaUrlDataModel {

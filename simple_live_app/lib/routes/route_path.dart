@@ -12,6 +12,12 @@ class RoutePath {
   /// 直播间
   static const kLiveRoomDetail = "/room/detail";
 
+  /// 回放列表
+  static const kReplayList = "/room/replay";
+
+  /// 回放播放
+  static const kReplayDetail = "/room/replay/detail";
+
   /// 弹幕设置
   static const kSettingsDanmu = "/settings/danmu";
 

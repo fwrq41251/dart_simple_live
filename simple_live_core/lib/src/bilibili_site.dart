@@ -6,6 +6,7 @@ import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/danmaku/bilibili_danmaku.dart';
 import 'package:simple_live_core/src/interface/live_danmaku.dart';
 import 'package:simple_live_core/src/interface/live_site.dart';
+import 'package:simple_live_core/src/model/live_replay.dart';
 import 'package:simple_live_core/src/model/live_anchor_item.dart';
 import 'package:simple_live_core/src/model/live_category.dart';
 import 'package:simple_live_core/src/model/live_message.dart';
@@ -606,5 +607,23 @@ class BiliBiliSite implements LiveSite {
         ?.replaceAll("\\", "");
     accessId = id ?? "";
     return accessId;
+  }
+  @override
+  bool get supportReplay => false;
+
+  @override
+  Future<LiveReplayListResult> getReplayList({
+    required String roomId,
+    int page = 1,
+  }) {
+    return Future.value(LiveReplayListResult(count: 0, items: []));
+  }
+
+  @override
+  Future<LiveReplayUrl> getReplayUrl({
+    required String roomId,
+    required String hashId,
+  }) {
+    return Future.value(LiveReplayUrl(qualities: []));
   }
 }

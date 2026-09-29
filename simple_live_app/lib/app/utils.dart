@@ -21,6 +21,22 @@ class Utils {
   static DateFormat dateFormatWithYear = DateFormat("yyyy-MM-dd HH:mm");
   static DateFormat timeFormat = DateFormat("HH:mm:ss");
 
+  /// 格式化时长，如 01:23:45 / 12:34
+  static String formatDuration(Duration d) {
+    if (d.inMilliseconds <= 0) {
+      return "00:00";
+    }
+    var h = d.inHours;
+    var m = d.inMinutes % 60;
+    var s = d.inSeconds % 60;
+    if (h > 0) {
+      return "${h.toString().padLeft(2, '0')}:"
+          "${m.toString().padLeft(2, '0')}:"
+          "${s.toString().padLeft(2, '0')}";
+    }
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
   /// 处理时间
   static String parseTime(DateTime? dt) {
     if (dt == null) {

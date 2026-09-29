@@ -9,6 +9,7 @@ import '../model/live_search_result.dart';
 
 import '../model/live_category.dart';
 import '../model/live_play_quality.dart';
+import '../model/live_replay.dart';
 import '../model/live_room_item.dart';
 
 class LiveSite {
@@ -86,5 +87,24 @@ class LiveSite {
   Future<List<LiveSuperChatMessage>> getSuperChatMessage(
       {required String roomId}) {
     return Future.value([]);
+  }
+
+  /// 是否支持回放
+  bool get supportReplay => false;
+
+  /// 读取房间的回放列表
+  Future<LiveReplayListResult> getReplayList({
+    required String roomId,
+    int page = 1,
+  }) {
+    return Future.value(LiveReplayListResult(count: 0, items: []));
+  }
+
+  /// 读取回放的播放地址
+  Future<LiveReplayUrl> getReplayUrl({
+    required String roomId,
+    required String hashId,
+  }) {
+    return Future.value(LiveReplayUrl(qualities: []));
   }
 }

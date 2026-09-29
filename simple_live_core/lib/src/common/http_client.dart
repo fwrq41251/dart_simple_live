@@ -11,6 +11,12 @@ class HttpClient {
     return _httpUtil!;
   }
 
+  /// 替换全局实例，用于测试注入 mock。
+  /// 传 null 可恢复默认实现。
+  static set instance(HttpClient? value) {
+    _httpUtil = value;
+  }
+
   late Dio dio;
   HttpClient() {
     dio = Dio(
