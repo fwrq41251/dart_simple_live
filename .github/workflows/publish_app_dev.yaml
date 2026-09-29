@@ -91,10 +91,11 @@ jobs:
           cd simple_live_app
           flutter pub get
 
-      - name: Validate Android toolchain
+      - name: Analyze and test
         run: |
           cd simple_live_app
-          flutter analyze --suggestions
+          flutter analyze
+          flutter test
 
       # 安装appdmg npm install -g appdmg
       - name: Install appdmg

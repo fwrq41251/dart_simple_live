@@ -71,10 +71,11 @@ jobs:
                   cd simple_live_tv_app
                   flutter pub get
 
-            - name: Validate Android toolchain
+            - name: Analyze and test
               run: |
                   cd simple_live_tv_app
-                  flutter analyze --suggestions
+                  flutter analyze
+                  flutter test
 
             #打包APK
             - name: Build APK
