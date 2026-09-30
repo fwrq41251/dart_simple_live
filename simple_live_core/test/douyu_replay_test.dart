@@ -93,6 +93,49 @@ void main() {
       expect(result.qualities, isNotEmpty);
     });
 
+    test('清晰度按 level 降序排列，索引 0 为最高清晰度', () async {
+      // 接口返回的 thumb_video 是 JSON 对象，键顺序由服务端决定：
+      // 实测 231059 房间返回 normal 在前、super 在后。
+      // 若直接沿用键顺序，currentQuality=0 会默认播标清。
+      HttpClient.instance = MockHttpClient({
+        'searchUser': fixture('search_user.json'),
+        'authorShowVideoList': fixture('replay_list.json'),
+        'v.douyu.com/show': fixture('replay_show.html'),
+        'getStreamUrlWeb': fixture('stream_url_unsorted.json'),
+      });
+
+      final result = await site.getReplayUrl(
+        roomId: '9999',
+        hashId: 'EO0XvNxPllxMDrBd',
+      );
+
+      // 响应里 normal(5) 在前、super(15) 在后，必须被重排
+      expect(
+        result.qualities.map((e) => e.quality).toList(),
+        ['super', 'high', 'normal'],
+      );
+      expect(result.qualities.first.name, '高清1080P');
+    });
+
+    test('level 缺失时保持原有相对顺序', () async {
+      HttpClient.instance = MockHttpClient({
+        'searchUser': fixture('search_user.json'),
+        'authorShowVideoList': fixture('replay_list.json'),
+        'v.douyu.com/show': fixture('replay_show.html'),
+        'getStreamUrlWeb': fixture('stream_url_no_level.json'),
+      });
+
+      final result = await site.getReplayUrl(
+        roomId: '9999',
+        hashId: 'EO0XvNxPllxMDrBd',
+      );
+
+      expect(
+        result.qualities.map((e) => e.quality).toList(),
+        ['normal', 'high', 'super'],
+      );
+    });
+
     test('页面缺少 \$DATA 时抛出明确异常', () async {
       HttpClient.instance = MockHttpClient({
         'searchUser': fixture('search_user.json'),

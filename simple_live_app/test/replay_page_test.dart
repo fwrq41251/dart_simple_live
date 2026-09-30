@@ -116,4 +116,75 @@ void main() {
     expect(controller.prepareCount, 1);
     expect(await controller.requestExit(), isFalse);
   });
+
+  testWidgets('读取结束后转圈消失', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var controller = Get.find<ReplayController>();
+    controller.loading.value = true;
+
+    await tester.pumpWidget(
+      const GetMaterialApp(
+        home: ReplayPage.withPlayer(
+          player: ColoredBox(key: Key('player'), color: Colors.black),
+        ),
+      ),
+    );
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    // 播放地址读取完成后 loading 归位，浮层必须跟着消失。
+    // 之前该浮层读的是 Obx 之外的 loading，依赖未注册，转圈会一直留在画面上。
+    controller.loading.value = false;
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('读取失败时展示重试入口', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var controller = Get.find<ReplayController>();
+    controller.loading.value = false;
+    controller.loadError.value = true;
+
+    await tester.pumpWidget(
+      const GetMaterialApp(
+        home: ReplayPage.withPlayer(
+          player: ColoredBox(key: Key('player'), color: Colors.black),
+        ),
+      ),
+    );
+
+    expect(find.text('无法读取回放'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('总时长读取后信息栏更新', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var controller = Get.find<ReplayController>();
+
+    await tester.pumpWidget(
+      const GetMaterialApp(
+        home: ReplayPage.withPlayer(
+          player: ColoredBox(key: Key('player'), color: Colors.black),
+        ),
+      ),
+    );
+
+    // 信息栏最初读到的是零时长，播放器上报后必须重建为真实时长。
+    controller.duration.value = const Duration(hours: 2, minutes: 2);
+    await tester.pump();
+
+    expect(find.textContaining('02:02:00'), findsOneWidget);
+  });
 }

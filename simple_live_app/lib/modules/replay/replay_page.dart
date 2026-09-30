@@ -98,48 +98,57 @@ class ReplayPage extends GetView<ReplayController> {
   }
 
   Widget _buildPlayer(BuildContext context) {
-    if (_playerOverride case final player?) {
-      return player;
-    }
     return MouseRegion(
       onHover: (_) => controller.showControlsTemporarily(),
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
           children: [
-            Video(
-              key: controller.globalPlayerKey,
-              controller: controller.videoController,
-              fit: BoxFit.contain,
-              controls: (state) => _buildControls(state),
-            ),
-            if (controller.loading.value)
-              const Center(
-                child: CircularProgressIndicator(),
+            // 测试用替身只替换视频画面本身，加载浮层保持真实，
+            // 否则覆盖件会绕过浮层，测试也就覆盖不到它。
+            if (_playerOverride case final player?)
+              player
+            else
+              Video(
+                key: controller.globalPlayerKey,
+                controller: controller.videoController,
+                fit: BoxFit.contain,
+                controls: (state) => _buildControls(state),
               ),
-            if (controller.loadError.value)
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Remix.error_warning_line,
-                      color: Colors.white,
-                      size: 48,
-                    ),
-                    AppStyle.vGap12,
-                    const Text(
-                      "无法读取回放",
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    AppStyle.vGap12,
-                    TextButton(
-                      onPressed: controller.loadData,
-                      child: const Text("重试"),
-                    ),
-                  ],
-                ),
-              ),
+            // 浮层必须在 Obx 内：_buildPlayer 处于 build() 的 Obx 之外，
+            // 直接读 loading 不会注册依赖，播放开始后转圈会一直留在画面上。
+            Obx(() {
+              if (controller.loading.value) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+              if (controller.loadError.value) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Remix.error_warning_line,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                      AppStyle.vGap12,
+                      const Text(
+                        "无法读取回放",
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      AppStyle.vGap12,
+                      TextButton(
+                        onPressed: controller.loadData,
+                        child: const Text("重试"),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            }),
           ],
         ),
       ),
@@ -329,32 +338,35 @@ class ReplayPage extends GetView<ReplayController> {
   }
 
   Widget _buildInfo(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: Theme.of(context).scaffoldBackgroundColor,
-      padding: AppStyle.edgeInsetsA16,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              controller.pItem.title,
-              style: Get.textTheme.titleMedium,
-            ),
-            AppStyle.vGap8,
-            Text(
-              "${controller.site.name}  ·  "
-              "${Utils.formatDuration(controller.duration.value)}",
-              style: Get.textTheme.bodySmall,
-            ),
-            if (controller.pItem.viewNum > 0) ...[
+    // duration 在读取到总时长后才更新，必须在 Obx 内读取才会重建。
+    return Obx(
+      () => Container(
+        width: double.infinity,
+        color: Theme.of(context).scaffoldBackgroundColor,
+        padding: AppStyle.edgeInsetsA16,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                controller.pItem.title,
+                style: Get.textTheme.titleMedium,
+              ),
               AppStyle.vGap8,
               Text(
-                "${controller.pItem.viewNum} 次观看",
+                "${controller.site.name}  ·  "
+                "${Utils.formatDuration(controller.duration.value)}",
                 style: Get.textTheme.bodySmall,
               ),
+              if (controller.pItem.viewNum > 0) ...[
+                AppStyle.vGap8,
+                Text(
+                  "${controller.pItem.viewNum} 次观看",
+                  style: Get.textTheme.bodySmall,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

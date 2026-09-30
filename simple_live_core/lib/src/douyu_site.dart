@@ -535,7 +535,12 @@ class DouyuSite implements LiveSite {
       throw Exception(result["msg"]);
     }
 
+    // thumb_video 是 JSON 对象，键顺序由服务端决定（实测出现过
+    // normal 在前、super 在前的多种排列），不能当作清晰度高低。
+    // 各档位自带 level（标清 5 / 高清 10 / 1080P 15 / 原画 20），
+    // 按 level 降序排列后，索引 0 才是真正的最高清晰度。
     var qualities = <LiveReplayQuality>[];
+    var levels = <int>[];
     var thumbVideo = result["data"]?["thumb_video"];
     if (thumbVideo is Map) {
       for (var key in thumbVideo.keys) {
@@ -549,10 +554,15 @@ class DouyuSite implements LiveSite {
           name: item["name"]?.toString() ?? key.toString(),
           url: url,
         ));
+        levels.add(int.tryParse(item["level"]?.toString() ?? "") ?? 0);
       }
     }
 
-    return LiveReplayUrl(qualities: qualities);
+    var order = List<int>.generate(qualities.length, (i) => i)
+      ..sort((a, b) => levels[b].compareTo(levels[a]));
+    return LiveReplayUrl(
+      qualities: order.map((i) => qualities[i]).toList(),
+    );
   }
 
   /// 从回放页提取 window.$DATA 中的 ROOM 节点。
