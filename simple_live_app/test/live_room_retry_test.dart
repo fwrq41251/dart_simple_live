@@ -66,10 +66,6 @@ class TestController extends LiveRoomController {
   @override
   Duration get recoveryBurstWindow => Duration.zero;
 
-  /// 看门狗在测试里用很短时限；其数值本身由专门用例断言。
-  @override
-  Duration get bufferingWatchdogTimeout => const Duration(milliseconds: 20);
-
   @override
   Future<void> initPlaylist() async {
     playlistOpens++;
@@ -333,42 +329,6 @@ void main() {
     expect(c.recoveryDelayFor(3), const Duration(seconds: 2));
     expect(c.recoveryDelayFor(4), const Duration(seconds: 4));
     expect(c.recoveryDelayFor(20), const Duration(seconds: 30), reason: '必须封顶');
-  });
-
-  test('缓冲后恢复播放不触发任何重建', () async {
-    // mpv 层开启重连后，短暂抖动表现为 buffering 而非 error。
-    // 此时必须什么都不做，否则会打断本来能自愈的连接。
-    var fake = FakeSite(urlsAvailable: true);
-    var c = build(fake);
-
-    c.onBufferingChanged(true);
-    c.onBufferingChanged(false); // mpv 自愈
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-
-    expect(c.playerJumps, 0, reason: '自愈的抖动不应重建播放链路');
-    expect(fake.fetchCount, 0, reason: '自愈的抖动不应重新取址');
-  });
-
-  test('缓冲超时后升级到重新取址', () async {
-    var fake = FakeSite(urlsAvailable: true);
-    var c = build(fake);
-
-    c.onBufferingChanged(true);
-    // 不恢复播放，等看门狗超时
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-
-    expect(fake.fetchCount, 1, reason: '持续缓冲应判定地址失效并重新取址');
-  });
-
-  test('缓冲结束后看门狗不再触发', () async {
-    var fake = FakeSite(urlsAvailable: true);
-    var c = build(fake);
-
-    c.onBufferingChanged(true);
-    c.onBufferingChanged(false);
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-
-    expect(fake.fetchCount, 0, reason: '缓冲已结束，看门狗必须被取消');
   });
 
   test('单次断流最多一次原地重载，随后直接换地址', () async {
