@@ -54,8 +54,17 @@ class TestController extends LiveRoomController {
   @override
   Duration get stablePlaybackDuration => const Duration(milliseconds: 20);
 
+  /// 退避在测试里不引入真实等待；退避数值本身由专门用例断言。
   @override
-  Duration get recoveryRetryDelay => Duration.zero;
+  Duration get recoveryBaseDelay => Duration.zero;
+
+  @override
+  Duration get recoveryMaxDelay => Duration.zero;
+
+  /// 默认关闭合并窗口，让每个 mediaEnd() 都代表一次独立断流。
+  /// 合并行为由 _BurstController 单独覆盖验证。
+  @override
+  Duration get recoveryBurstWindow => Duration.zero;
 
   @override
   Future<void> initPlaylist() async {
@@ -259,6 +268,108 @@ void main() {
 
     expect(c.messages.length, lessThanOrEqualTo(500), reason: '上滚状态下列表不应无限增长');
   });
+
+  test('同一波断流的重复事件只触发一次恢复', () async {
+    // 播放器在一次中断里会连抛 error + completed。第一轮恢复结束、
+    // 新地址尚未产生 playing 事件时的空窗期里，迟到的事件若不折叠，
+    // 会立刻再触发一轮重新取址 —— 这就是"刷新时重复好几次"。
+    var fake = FakeSite(urlsAvailable: true);
+    var c = _BurstController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    c.seed();
+
+    // 第一轮恢复（取址 + 重建播放列表）
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(fake.fetchCount, 1);
+    expect(c.playlistOpens, 1);
+
+    // 空窗期内迟到的同波事件
+    c.mediaError('stream error');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(fake.fetchCount, 1, reason: '同一波断流不应重复取址');
+    expect(c.playlistOpens, 1, reason: '同一波断流不应重复重建播放列表');
+  });
+
+  test('退避窗口过后的新断流仍会恢复', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = _BurstController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    c.seed();
+
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(fake.fetchCount, 1);
+
+    // 模拟播放稳定后再次断流：窗口与计数都已重置，必须重新恢复
+    c.onPlayingChanged(true);
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    // 重置后重试计数归零，新一轮走"重载当前线路"分支
+    expect(c.playerJumps, 1, reason: '稳定后的新断流不应被旧窗口吞掉');
+  });
+
+  test('退避按指数增长并封顶', () {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = _RealBackoffController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+
+    // 500ms 基准：0.5s, 1s, 2s, 4s ... 封顶 30s
+    expect(c.recoveryDelayFor(1), const Duration(milliseconds: 500));
+    expect(c.recoveryDelayFor(2), const Duration(seconds: 1));
+    expect(c.recoveryDelayFor(3), const Duration(seconds: 2));
+    expect(c.recoveryDelayFor(4), const Duration(seconds: 4));
+    expect(c.recoveryDelayFor(20), const Duration(seconds: 30), reason: '必须封顶');
+  });
+}
+
+/// 保留真实退避参数、但不真正等待的控制器。
+class _RealBackoffController extends TestController {
+  _RealBackoffController({required super.pSite, required super.pRoomId});
+
+  @override
+  Duration get recoveryBaseDelay => const Duration(milliseconds: 500);
+
+  @override
+  Duration get recoveryMaxDelay => const Duration(seconds: 30);
+}
+
+/// 保留真实合并窗口的控制器：用于验证同一波断流被折叠。
+class _BurstController extends TestController {
+  _BurstController({required super.pSite, required super.pRoomId});
+
+  @override
+  Duration get recoveryBurstWindow => const Duration(seconds: 5);
+
+  /// 置为「正在播放中」并沿用 TestController 的测试默认值。
+  void seed() {
+    detail.value = LiveRoomDetail(
+        roomId: '1',
+        title: 't',
+        cover: '',
+        userName: 'u',
+        userAvatar: '',
+        online: 1,
+        status: true,
+        data: '',
+        url: '',
+        isRecord: false);
+    qualites.value = [LivePlayQuality(quality: '高清', data: 'x')];
+    currentQuality = 0;
+    liveStatus.value = true;
+    playUrls.value = ['http://old/1.flv', 'http://old/2.flv'];
+    currentLineIndex = 1;
+    mediaErrorRetryCount = 2;
+  }
 }
 
 /// 测试用 wakelock 实现

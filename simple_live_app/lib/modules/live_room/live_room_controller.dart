@@ -528,11 +528,37 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   int _freshUrlAttempts = 0;
   static const int _maxFreshUrlAttempts = 3;
 
+  /// 上一次处理断流事件的时间，用于折叠同一波断流。
+  DateTime? _lastRecoveryEventAt;
+
   @protected
   Duration get stablePlaybackDuration => const Duration(seconds: 10);
 
+  /// 重试退避的基准间隔（斗鱼网页端同样以 1s 起步）。
   @protected
-  Duration get recoveryRetryDelay => const Duration(seconds: 1);
+  Duration get recoveryBaseDelay => const Duration(milliseconds: 500);
+
+  /// 退避上限，避免长时间断流后等待过久（对齐斗鱼网页端的 30s 上限）。
+  @protected
+  Duration get recoveryMaxDelay => const Duration(seconds: 30);
+
+  /// 同一波断流的合并窗口：窗口内的重复事件视为同一次中断。
+  ///
+  /// 播放器在一次中断里会连续抛出多个事件（error、completed、以及换线路后
+  /// 新地址尚未就绪时的再次 error）。斗鱼网页端用 throttle 折叠这些调用，
+  /// 这里用时间窗口达到同样效果，避免同一波断流被重放多次。
+  @protected
+  Duration get recoveryBurstWindow => const Duration(milliseconds: 800);
+
+  /// 指数退避：第 n 次重试等待 base * 2^(n-1)，封顶 recoveryMaxDelay。
+  Duration recoveryDelayFor(int attempt) {
+    var exponent = attempt <= 1 ? 0 : attempt - 1;
+    var millis = recoveryBaseDelay.inMilliseconds * (1 << exponent);
+    var capped = millis > recoveryMaxDelay.inMilliseconds
+        ? recoveryMaxDelay.inMilliseconds
+        : millis;
+    return Duration(milliseconds: capped);
+  }
 
   Future<void> _recoverPlayback(String failMessage) async {
     _reportedPlaying = false;
@@ -545,6 +571,16 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
 
+    // 同一波断流只处理一次：播放器会连抛多个事件，
+    // 若逐个处理，一次断流会触发多轮换线/换地址。
+    var now = DateTime.now();
+    var last = _lastRecoveryEventAt;
+    if (last != null && now.difference(last) < recoveryBurstWindow) {
+      Log.d("同一波断流，忽略重复事件");
+      return;
+    }
+    _lastRecoveryEventAt = now;
+
     var generation = _playbackGeneration;
     _recoveringPlayback = true;
     try {
@@ -553,7 +589,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         mediaErrorRetryCount += 1;
         Log.d("播放中断，尝试第$mediaErrorRetryCount次重载当前线路");
         if (mediaErrorRetryCount > 1) {
-          await Future.delayed(recoveryRetryDelay);
+          await Future.delayed(recoveryDelayFor(mediaErrorRetryCount));
         }
         if (!_isCurrentPlaybackGeneration(generation)) {
           return;
@@ -602,7 +638,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _freshUrlAttempts += 1;
     Log.d("播放地址可能已失效，重新获取（第$_freshUrlAttempts/$_maxFreshUrlAttempts 次）");
     if (_freshUrlAttempts > 1) {
-      await Future.delayed(recoveryRetryDelay);
+      await Future.delayed(recoveryDelayFor(_freshUrlAttempts));
     }
     if (!_isCurrentPlaybackGeneration(generation)) {
       return;
@@ -635,6 +671,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _freshUrlAttempts = 0;
     _awaitingStablePlayback = false;
     _automaticRecoveryExhausted = false;
+    _lastRecoveryEventAt = null;
   }
 
   @override
