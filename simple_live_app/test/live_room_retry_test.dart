@@ -1,6 +1,8 @@
 // 验证重试逻辑：播放地址失效 vs 房间确实下播
 // 对应修复：重试计数用尽后重新获取播放地址，而不是直接判定未开播。
 // ignore_for_file: must_call_super
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
@@ -14,6 +16,7 @@ class FakeSite extends LiveSite {
   FakeSite({required this.urlsAvailable});
   final bool urlsAvailable;
   int fetchCount = 0;
+  Completer<LivePlayUrl>? pendingPlayUrl;
 
   @override
   String get id => "douyu";
@@ -27,8 +30,12 @@ class FakeSite extends LiveSite {
 
   @override
   Future<LivePlayUrl> getPlayUrls(
-      {required LiveRoomDetail detail, required LivePlayQuality quality}) async {
+      {required LiveRoomDetail detail,
+      required LivePlayQuality quality}) async {
     fetchCount++;
+    if (pendingPlayUrl case final pending?) {
+      return pending.future;
+    }
     if (!urlsAvailable) return LivePlayUrl(urls: []);
     return LivePlayUrl(
         urls: ['http://a/1.flv?expire=300', 'http://a/2.flv?expire=300']);
@@ -40,10 +47,16 @@ class TestController extends LiveRoomController {
   TestController({required super.pSite, required super.pRoomId});
 
   int playlistOpens = 0;
+  int replayStops = 0;
 
   @override
-  void initPlaylist() async {
+  Future<void> initPlaylist() async {
     playlistOpens++;
+  }
+
+  @override
+  Future<void> stopPlayerForReplay() async {
+    replayStops++;
   }
 
   @override
@@ -64,8 +77,16 @@ TestController build(FakeSite fake) {
       pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
       pRoomId: '1');
   c.detail.value = LiveRoomDetail(
-      roomId: '1', title: 't', cover: '', userName: 'u', userAvatar: '',
-      online: 1, status: true, data: '', url: '', isRecord: false);
+      roomId: '1',
+      title: 't',
+      cover: '',
+      userName: 'u',
+      userAvatar: '',
+      online: 1,
+      status: true,
+      data: '',
+      url: '',
+      isRecord: false);
   c.qualites.value = [LivePlayQuality(quality: '高清', data: 'x')];
   c.currentQuality = 0;
   // 模拟正在播放中
@@ -133,6 +154,36 @@ void main() {
     expect(c.mediaErrorRetryCount, 0);
   });
 
+  test('进入回放只停止一次直播，返回后只恢复一次', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    await c.suspendForReplay();
+    await c.suspendForReplay();
+    expect(c.replayStops, 1);
+
+    await c.resumeAfterReplay();
+    await c.resumeAfterReplay();
+    expect(fake.fetchCount, 1);
+    expect(c.playlistOpens, 1);
+  });
+
+  test('进入回放后忽略尚未完成的旧直播地址请求', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    fake.pendingPlayUrl = Completer<LivePlayUrl>();
+    var c = build(fake);
+
+    var request = c.getPlayUrl();
+    await Future<void>.delayed(Duration.zero);
+    await c.suspendForReplay();
+    fake.pendingPlayUrl!.complete(
+      LivePlayUrl(urls: ['http://stale/live.flv']),
+    );
+
+    expect(await request, isFalse);
+    expect(c.playlistOpens, 0);
+  });
+
   test('上滚暂停自动滚动时，聊天列表仍有绝对上限', () {
     var fake = FakeSite(urlsAvailable: true);
     var c = build(fake);
@@ -149,8 +200,7 @@ void main() {
       ));
     }
 
-    expect(c.messages.length, lessThanOrEqualTo(500),
-        reason: '上滚状态下列表不应无限增长');
+    expect(c.messages.length, lessThanOrEqualTo(500), reason: '上滚状态下列表不应无限增长');
   });
 }
 

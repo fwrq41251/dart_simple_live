@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -12,12 +12,13 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:window_manager/window_manager.dart';
 
 /// 回放播放控制器。
 ///
 /// 与直播（LiveRoomController）语义不同：回放是可 seek 的点播，
 /// 需要进度、暂停、倍速，不需要追流与断线重连，因此独立实现。
-class ReplayController extends BaseController {
+class ReplayController extends BaseController with WindowListener {
   final Site pSite;
   final String pRoomId;
   final LiveReplayItem pItem;
@@ -75,6 +76,9 @@ class ReplayController extends BaseController {
   /// 全屏
   var fullScreen = false.obs;
 
+  /// 路由只有在播放器停止后才允许退出。
+  var allowPop = false.obs;
+
   /// 显示控制条
   var showControls = true.obs;
 
@@ -84,10 +88,23 @@ class ReplayController extends BaseController {
   StreamSubscription? _playingSubscription;
   StreamSubscription? _errorSubscription;
   StreamSubscription? _completedSubscription;
+  Future<void> _playerOperations = Future<void>.value();
+  Future<void>? _prepareForExitFuture;
+  bool _closing = false;
+  bool _exitRequested = false;
+  bool _playerDisposed = false;
+
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  bool get closing => _closing;
 
   @override
   void onInit() {
     super.onInit();
+    if (_isDesktop) {
+      windowManager.addListener(this);
+    }
     initStream();
     loadData();
   }
@@ -100,6 +117,9 @@ class ReplayController extends BaseController {
       duration.value = e;
     });
     _playingSubscription = player.stream.playing.listen((e) {
+      if (_closing) {
+        return;
+      }
       playing.value = e;
       if (e) {
         WakelockPlus.enable();
@@ -108,6 +128,9 @@ class ReplayController extends BaseController {
       }
     });
     _errorSubscription = player.stream.error.listen((e) {
+      if (_closing) {
+        return;
+      }
       Log.d("回放播放器错误：$e");
       if (e.contains('no sound.')) {
         return;
@@ -123,6 +146,9 @@ class ReplayController extends BaseController {
 
   /// 读取回放地址
   Future<void> loadData() async {
+    if (_closing) {
+      return;
+    }
     loading.value = true;
     loadError.value = false;
     try {
@@ -130,6 +156,9 @@ class ReplayController extends BaseController {
         roomId: pRoomId,
         hashId: pItem.hashId,
       );
+      if (_closing) {
+        return;
+      }
       if (result.qualities.isEmpty) {
         loadError.value = true;
         SmartDialog.showToast("无法读取回放地址");
@@ -140,90 +169,206 @@ class ReplayController extends BaseController {
       currentQuality.value = 0;
       await playCurrent();
     } catch (e) {
+      if (_closing) {
+        return;
+      }
       Log.logPrint(e);
       loadError.value = true;
       SmartDialog.showToast("无法读取回放地址");
     } finally {
-      loading.value = false;
+      if (!_closing) {
+        loading.value = false;
+      }
     }
   }
 
+  Future<void> _runPlayerOperation(
+    Future<void> Function() operation,
+  ) {
+    if (_closing) {
+      return Future<void>.value();
+    }
+    final result = _playerOperations.then((_) async {
+      if (!_closing) {
+        await operation();
+      }
+    });
+    _playerOperations = result.catchError((_) {});
+    return result;
+  }
+
   Future<void> playCurrent() async {
-    if (currentQuality.value < 0 ||
+    if (_closing ||
+        currentQuality.value < 0 ||
         currentQuality.value >= qualities.length) {
       return;
     }
     var url = qualities[currentQuality.value].url;
-    await player.open(Media(url));
+    await _runPlayerOperation(() => player.open(Media(url)));
   }
 
   /// 切换清晰度（保留播放位置）
   Future<void> changeQuality(int index) async {
-    if (index == currentQuality.value) {
+    if (_closing || index == currentQuality.value) {
       return;
     }
     var last = position.value;
     currentQuality.value = index;
     await playCurrent();
-    if (last > Duration.zero) {
-      await player.seek(last);
+    if (!_closing && last > Duration.zero) {
+      await seekTo(last);
     }
   }
 
-  /// 拖动进度
+  /// 拖动进度，并将越界值限制在有效范围内。
   Future<void> seekTo(Duration value) async {
-    await player.seek(value);
-    position.value = value;
+    if (_closing) {
+      return;
+    }
+    var milliseconds = value.inMilliseconds;
+    if (milliseconds < 0) {
+      milliseconds = 0;
+    }
+    var total = duration.value.inMilliseconds;
+    if (total > 0 && milliseconds > total) {
+      milliseconds = total;
+    }
+    var target = Duration(milliseconds: milliseconds);
+    await _runPlayerOperation(() => player.seek(target));
+    if (!_closing) {
+      position.value = target;
+    }
   }
 
   Future<void> togglePlay() async {
     if (playing.value) {
-      await player.pause();
+      await _runPlayerOperation(player.pause);
     } else {
-      await player.play();
+      await _runPlayerOperation(player.play);
     }
   }
 
   Future<void> setSpeed(double value) async {
     speed.value = value;
-    await player.setRate(value);
+    await _runPlayerOperation(() => player.setRate(value));
   }
 
   void showControlsTemporarily() {
+    if (_closing) {
+      return;
+    }
     showControls.value = true;
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 4), () {
-      showControls.value = false;
+      if (!_closing) {
+        showControls.value = false;
+      }
     });
   }
 
-  void toggleFullScreen() {
-    fullScreen.value = !fullScreen.value;
-    if (fullScreen.value) {
-      SystemChrome.setPreferredOrientations([
+  Future<void> toggleFullScreen() async {
+    if (_closing) {
+      return;
+    }
+    var enter = !fullScreen.value;
+    if (_isDesktop) {
+      await windowManager.setFullScreen(enter);
+      fullScreen.value = enter;
+      return;
+    }
+
+    fullScreen.value = enter;
+    if (enter) {
+      await SystemChrome.setPreferredOrientations([
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
-      SystemChrome.setPreferredOrientations([
+      await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
       ]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
   }
 
   @override
-  void onClose() {
+  void onWindowEnterFullScreen() {
+    fullScreen.value = true;
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    fullScreen.value = false;
+  }
+
+  /// 停止播放器后才允许路由退出，避免 Windows 原生纹理释放竞争。
+  Future<void> prepareForExit() {
+    return _prepareForExitFuture ??= _prepareForExit();
+  }
+
+  Future<bool> requestExit() async {
+    if (_exitRequested) {
+      return false;
+    }
+    _exitRequested = true;
+    await prepareForExit();
+    allowPop.value = true;
+    return true;
+  }
+
+  Future<void> _prepareForExit() async {
+    _closing = true;
+    _hideControlsTimer?.cancel();
+    try {
+      await _playerOperations;
+    } catch (e) {
+      Log.logPrint(e);
+    }
+    try {
+      await player.stop();
+    } catch (e) {
+      Log.logPrint(e);
+    }
+    await WakelockPlus.disable();
+  }
+
+  Future<void> _disposePlayer() async {
+    await prepareForExit();
+    try {
+      if (_isDesktop) {
+        if (await windowManager.isFullScreen()) {
+          await windowManager.setFullScreen(false);
+        }
+      } else {
+        await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      }
+    } catch (e) {
+      Log.logPrint(e);
+    }
+    if (!_playerDisposed) {
+      _playerDisposed = true;
+      try {
+        await player.dispose();
+      } catch (e) {
+        Log.logPrint(e);
+      }
+    }
+  }
+
+  @override
+  void onClose() async {
+    if (_isDesktop) {
+      windowManager.removeListener(this);
+    }
     _hideControlsTimer?.cancel();
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();
     _playingSubscription?.cancel();
     _errorSubscription?.cancel();
     _completedSubscription?.cancel();
-    player.dispose();
-    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    await _disposePlayer();
     super.onClose();
   }
 }

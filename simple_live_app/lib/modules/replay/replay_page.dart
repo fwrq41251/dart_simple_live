@@ -8,61 +8,141 @@ import 'package:simple_live_app/modules/replay/replay_controller.dart';
 
 /// 回放播放页
 class ReplayPage extends GetView<ReplayController> {
-  const ReplayPage({Key? key}) : super(key: key);
+  final Widget? _playerOverride;
+
+  const ReplayPage({Key? key})
+      : _playerOverride = null,
+        super(key: key);
+
+  @visibleForTesting
+  const ReplayPage.withPlayer({
+    required Widget player,
+    Key? key,
+  })  : _playerOverride = player,
+        super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Obx(
-          () => controller.fullScreen.value
-              ? _buildPlayer(context)
-              : Column(
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: _buildPlayer(context),
-                    ),
-                    Expanded(child: _buildInfo(context)),
-                  ],
+    return Obx(() {
+      var fullScreen = controller.fullScreen.value;
+      return PopScope(
+        canPop: controller.allowPop.value,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) {
+            return;
+          }
+          if (controller.fullScreen.value) {
+            await controller.toggleFullScreen();
+            return;
+          }
+          if (await controller.requestExit()) {
+            await WidgetsBinding.instance.endOfFrame;
+            if (context.mounted) {
+              Navigator.of(context).pop(result);
+            }
+          }
+        },
+        child: Scaffold(
+          backgroundColor: fullScreen
+              ? Colors.black
+              : Theme.of(context).scaffoldBackgroundColor,
+          appBar: fullScreen
+              ? null
+              : AppBar(
+                  title: Text(
+                    controller.pItem.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+          body: fullScreen ? _buildPlayer(context) : _buildPageBody(context),
         ),
+      );
+    });
+  }
+
+  Widget _buildPageBody(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          var useWideLayout = constraints.maxWidth >= 900;
+          if (useWideLayout) {
+            return Row(
+              children: [
+                Expanded(
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: _buildPlayer(context),
+                  ),
+                ),
+                SizedBox(
+                  width: 340,
+                  child: _buildInfo(context),
+                ),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: _buildPlayer(context),
+              ),
+              Expanded(child: _buildInfo(context)),
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildPlayer(BuildContext context) {
-    return Stack(
-      children: [
-        Video(
-          key: controller.globalPlayerKey,
-          controller: controller.videoController,
-          fit: BoxFit.contain,
-          controls: (state) => _buildControls(state),
-        ),
-        if (controller.loading.value)
-          const Center(
-            child: CircularProgressIndicator(),
-          ),
-        if (controller.loadError.value)
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Remix.error_warning_line,
-                    color: Colors.white, size: 48),
-                AppStyle.vGap12,
-                const Text("无法读取回放", style: TextStyle(color: Colors.white)),
-                AppStyle.vGap12,
-                TextButton(
-                  onPressed: controller.loadData,
-                  child: const Text("重试"),
-                ),
-              ],
+    if (_playerOverride case final player?) {
+      return player;
+    }
+    return MouseRegion(
+      onHover: (_) => controller.showControlsTemporarily(),
+      child: ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          children: [
+            Video(
+              key: controller.globalPlayerKey,
+              controller: controller.videoController,
+              fit: BoxFit.contain,
+              controls: (state) => _buildControls(state),
             ),
-          ),
-      ],
+            if (controller.loading.value)
+              const Center(
+                child: CircularProgressIndicator(),
+              ),
+            if (controller.loadError.value)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Remix.error_warning_line,
+                      color: Colors.white,
+                      size: 48,
+                    ),
+                    AppStyle.vGap12,
+                    const Text(
+                      "无法读取回放",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    AppStyle.vGap12,
+                    TextButton(
+                      onPressed: controller.loadData,
+                      child: const Text("重试"),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -75,7 +155,28 @@ class ReplayPage extends GetView<ReplayController> {
           color: Colors.black26,
           child: Column(
             children: [
-              Expanded(child: Container()),
+              if (controller.showControls.value && controller.fullScreen.value)
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: "退出全屏",
+                      onPressed: controller.toggleFullScreen,
+                      icon: const Icon(
+                        Icons.arrow_back,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        controller.pItem.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              const Expanded(child: SizedBox()),
               if (controller.showControls.value) _buildBottomBar(),
             ],
           ),
@@ -118,10 +219,13 @@ class ReplayPage extends GetView<ReplayController> {
               ),
             ],
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
             children: [
               IconButton(
+                tooltip: "后退 15 秒",
                 onPressed: () => controller.seekTo(
                   controller.position.value - const Duration(seconds: 15),
                 ),
@@ -129,6 +233,7 @@ class ReplayPage extends GetView<ReplayController> {
               ),
               Obx(
                 () => IconButton(
+                  tooltip: controller.playing.value ? "暂停" : "播放",
                   onPressed: controller.togglePlay,
                   icon: Icon(
                     controller.playing.value
@@ -140,18 +245,17 @@ class ReplayPage extends GetView<ReplayController> {
                 ),
               ),
               IconButton(
+                tooltip: "前进 15 秒",
                 onPressed: () => controller.seekTo(
                   controller.position.value + const Duration(seconds: 15),
                 ),
                 icon: const Icon(Remix.forward_15_line, color: Colors.white),
               ),
-              AppStyle.hGap12,
               _buildSpeedButton(),
-              AppStyle.hGap12,
               _buildQualityButton(),
-              AppStyle.hGap12,
               Obx(
                 () => IconButton(
+                  tooltip: controller.fullScreen.value ? "退出全屏" : "进入全屏",
                   onPressed: controller.toggleFullScreen,
                   icon: Icon(
                     controller.fullScreen.value
@@ -229,20 +333,29 @@ class ReplayPage extends GetView<ReplayController> {
       width: double.infinity,
       color: Theme.of(context).scaffoldBackgroundColor,
       padding: AppStyle.edgeInsetsA16,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            controller.pItem.title,
-            style: Get.textTheme.titleMedium,
-          ),
-          AppStyle.vGap8,
-          Text(
-            "${controller.site.name}  ·  "
-            "${Utils.formatDuration(controller.duration.value)}",
-            style: Get.textTheme.bodySmall,
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              controller.pItem.title,
+              style: Get.textTheme.titleMedium,
+            ),
+            AppStyle.vGap8,
+            Text(
+              "${controller.site.name}  ·  "
+              "${Utils.formatDuration(controller.duration.value)}",
+              style: Get.textTheme.bodySmall,
+            ),
+            if (controller.pItem.viewNum > 0) ...[
+              AppStyle.vGap8,
+              Text(
+                "${controller.pItem.viewNum} 次观看",
+                style: Get.textTheme.bodySmall,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

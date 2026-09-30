@@ -6,6 +6,7 @@ import 'package:simple_live_app/modules/replay/replay_list_controller.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 import 'package:simple_live_app/widgets/page_list_view.dart';
+import 'package:simple_live_core/simple_live_core.dart';
 
 /// 回放列表页
 class ReplayListPage extends GetView<ReplayListController> {
@@ -23,19 +24,35 @@ class ReplayListPage extends GetView<ReplayListController> {
           ),
         ),
       ),
-      body: PageListView(
-        pageController: controller,
-        padding: AppStyle.edgeInsetsA12,
-        separatorBuilder: (_, __) => AppStyle.vGap12,
-        itemBuilder: (_, i) {
-          var session = controller.list[i];
-          return _buildSessionCard(context, session);
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          var horizontalPadding = constraints.maxWidth >= 900 ? 24.0 : 12.0;
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1000),
+              child: PageListView(
+                pageController: controller,
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: 12,
+                ),
+                separatorBuilder: (_, __) => AppStyle.vGap12,
+                itemBuilder: (_, i) {
+                  var session = controller.list[i];
+                  return _buildSessionCard(context, session);
+                },
+              ),
+            ),
+          );
         },
       ),
     );
   }
 
-  Widget _buildSessionCard(BuildContext context, dynamic session) {
+  Widget _buildSessionCard(
+    BuildContext context,
+    LiveReplaySession session,
+  ) {
     return Card(
       clipBehavior: Clip.antiAlias,
       margin: EdgeInsets.zero,
@@ -50,38 +67,38 @@ class ReplayListPage extends GetView<ReplayListController> {
                 AppStyle.hGap8,
                 Expanded(
                   child: Text(
-                    session.time as String,
+                    session.time,
                     style: Get.textTheme.titleSmall,
                   ),
                 ),
                 Text(
-                  session.dateFormat as String,
+                  session.dateFormat,
                   style: Get.textTheme.bodySmall,
                 ),
               ],
             ),
           ),
           // 该场次下的分段
-          ...(session.items as List).map<Widget>((item) {
+          ...session.items.map<Widget>((item) {
             return ListTile(
-              leading: item.cover.toString().isEmpty
+              leading: item.cover.isEmpty
                   ? const Icon(Remix.play_circle_line, size: 40)
                   : NetImage(
-                      item.cover.toString(),
-                      width: 64,
-                      height: 40,
-                      cacheWidth: 128,
+                      item.cover,
+                      width: 80,
+                      height: 45,
+                      cacheWidth: 160,
                       fit: BoxFit.cover,
                     ),
               title: Text(
-                item.title.toString(),
+                item.title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
               subtitle: Text(
-                item.strDuration.toString().isEmpty
+                item.strDuration.isEmpty
                     ? item.duration.toString()
-                    : item.strDuration.toString(),
+                    : item.strDuration,
               ),
               trailing: const Icon(Remix.play_fill),
               onTap: () {

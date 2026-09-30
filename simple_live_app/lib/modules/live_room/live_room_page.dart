@@ -829,12 +829,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 leading: const Icon(Icons.history),
                 title: const Text("查看回放"),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () {
+                onTap: () async {
                   Get.back();
-                  AppNavigator.toReplayList(
-                    site: controller.site,
-                    roomId: controller.roomId,
-                  );
+                  await controller.suspendForReplay();
+                  if (controller.isClosed) {
+                    return;
+                  }
+                  try {
+                    await AppNavigator.toReplayList(
+                      site: controller.site,
+                      roomId: controller.roomId,
+                    );
+                  } finally {
+                    await controller.resumeAfterReplay();
+                  }
                 },
               ),
             ListTile(
