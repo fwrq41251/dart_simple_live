@@ -41,6 +41,12 @@ it points at rather than whatever the branch happens to be.
 - Flutter is pinned to `3.47.1` with FVM in both Flutter projects.
 - Run Flutter commands from the relevant app directory with `fvm flutter ...`; use `fvm dart ...` when a Flutter project's Dart SDK is required.
 - Run `fvm install` in each Flutter project if the pinned SDK is not available locally.
+- If FVM is not installed on the machine, do not fall back to the Flutter on
+  `PATH` — it is a different version and will not match `.fvmrc`. Install the
+  pinned SDK through whatever version manager is available (for example
+  `mise install flutter@3.47.1-stable`) and run commands through it, e.g.
+  `mise exec flutter@3.47.1-stable -- flutter ...`. Verify with
+  `... flutter --version` that the reported version is `3.47.1`.
 - Run Dart commands for `simple_live_core` and `simple_live_console` from their own directories.
 - Each project owns its `pubspec.lock`. Keep intentional lockfile changes, but do not regenerate unrelated dependencies.
 - Do not commit generated or local state from `.dart_tool/`, `.fvm/`, `build/`, IDE settings, CocoaPods, or platform ephemeral directories.
