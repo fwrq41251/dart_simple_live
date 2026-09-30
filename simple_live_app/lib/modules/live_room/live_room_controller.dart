@@ -531,6 +531,20 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 上一次处理断流事件的时间，用于折叠同一波断流。
   DateTime? _lastRecoveryEventAt;
 
+  /// 缓冲看门狗：区分「网络抖动，mpv 正在自愈」与「地址真的失效」。
+  ///
+  /// mpv 开启 stream-lavf-o 重连后，短暂抖动不再抛 error，而是进入
+  /// paused-for-cache。此时重建播放链路只会打断本来能自愈的连接，所以先等；
+  /// 只有持续缓冲超过 watchdog 时限，才认定地址失效并升级到换地址。
+  Timer? _bufferingWatchdog;
+  DateTime? _bufferingSince;
+  bool _bufferingActive = false;
+
+  /// 缓冲持续多久后认定地址失效。需大于 mpv 单次重连等待上限（5s），
+  /// 否则会在 mpv 自愈前抢先重建。
+  @protected
+  Duration get bufferingWatchdogTimeout => const Duration(seconds: 12);
+
   @protected
   Duration get stablePlaybackDuration => const Duration(seconds: 10);
 
@@ -584,30 +598,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     var generation = _playbackGeneration;
     _recoveringPlayback = true;
     try {
-      // 新地址尚未稳定时再次失败，直接换新地址，不再反复 jump 同一地址。
-      if (!_awaitingStablePlayback && mediaErrorRetryCount < 2) {
+      // 第一级：原地重载当前线路一次。mpv 层已开启 HTTP 重连，能自愈的
+      // 抖动不会走到这里；走到这里说明连接确实断了，重载一次仍值得尝试。
+      if (!_awaitingStablePlayback && mediaErrorRetryCount < 1) {
         mediaErrorRetryCount += 1;
-        Log.d("播放中断，尝试第$mediaErrorRetryCount次重载当前线路");
-        if (mediaErrorRetryCount > 1) {
-          await Future.delayed(recoveryDelayFor(mediaErrorRetryCount));
-        }
-        if (!_isCurrentPlaybackGeneration(generation)) {
-          return;
-        }
+        Log.d("播放中断，重载当前线路");
         await setPlayer();
         return;
       }
 
-      if (!_awaitingStablePlayback &&
-          currentLineIndex >= 0 &&
-          currentLineIndex < playUrls.length - 1) {
-        currentLineIndex += 1;
-        mediaErrorRetryCount = 0;
-        Log.d("当前线路不可用，切换至线路${currentLineIndex + 1}");
-        await setPlayer();
-        return;
-      }
-
+      // 第二级：重新向平台请求地址。斗鱼地址带时效签名，签名过期后换线路
+      // 拿到的仍是同一个失效签名，只有重新取址才有意义。
       await retryWithFreshUrls(failMessage, generation);
     } catch (e) {
       Log.logPrint(e);
@@ -666,6 +667,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   void _resetRecoveryState() {
     _stablePlaybackTimer?.cancel();
+    _bufferingWatchdog?.cancel();
+    _bufferingActive = false;
+    _bufferingSince = null;
     _reportedPlaying = false;
     mediaErrorRetryCount = 0;
     _freshUrlAttempts = 0;
@@ -686,6 +690,41 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         Log.d("播放已稳定，重置断流恢复状态");
         _resetRecoveryState();
       }
+    });
+  }
+
+  /// mpv 缓冲状态变化。由 PlayerController 的 buffering 流驱动。
+  ///
+  /// 进入缓冲时启动看门狗：mpv 若在时限内自愈（恢复播放），什么都不做，
+  /// 画面不重建；超时则说明地址失效，升级到换新地址。
+  @override
+  void onBufferingChanged(bool buffering) {
+    if (_replaySuspended || isClosed || !liveStatus.value) {
+      return;
+    }
+    _bufferingActive = buffering;
+    _bufferingWatchdog?.cancel();
+    if (!buffering) {
+      _bufferingSince = null;
+      return;
+    }
+
+    _bufferingSince = DateTime.now();
+    Log.d("播放缓冲中，等待 mpv 自愈");
+    _bufferingWatchdog = Timer(bufferingWatchdogTimeout, () {
+      if (!_bufferingActive || _replaySuspended || isClosed) {
+        return;
+      }
+      var since = _bufferingSince;
+      if (since == null ||
+          DateTime.now().difference(since) < bufferingWatchdogTimeout) {
+        return;
+      }
+      Log.d("缓冲超时，判定播放地址失效");
+      // 先清掉缓冲态，否则升级过程中新事件会被自身的看门狗逻辑干扰
+      _bufferingActive = false;
+      _bufferingSince = null;
+      unawaited(_recoverPlayback("播放地址失效"));
     });
   }
 
@@ -1318,6 +1357,7 @@ ${error?.toString()}
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();
     _stablePlaybackTimer?.cancel();
+    _bufferingWatchdog?.cancel();
     _replaySuspended = true;
 
     liveDanmaku.stop();

@@ -26,10 +26,31 @@ mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
 
+  /// mpv/FFmpeg 层的 HTTP 重连参数。
+  ///
+  /// media_kit 从不设置 `stream-lavf-o`，FFmpeg 的 reconnect 选项默认全为
+  /// false，因此网络抖动会直接冒泡成 error/completed，由 Dart 层重建整个
+  /// 播放链路（换 URL、重建 demuxer），画面必然停顿。
+  ///
+  /// 开启后短暂抖动在 demuxer 内部自愈，画面不重建。重试次数不限（-1），
+  /// 单次等待上限 5 秒；真正的地址失效（签名过期）由 live_room_controller
+  /// 的缓冲看门狗升级处理。
+  static const String kStreamReconnectOptions =
+      'reconnect=1,'
+      'reconnect_streamed=1,'
+      'reconnect_on_network_error=1,'
+      'reconnect_delay_max=5,'
+      'reconnect_max_retries=-1';
+
   /// 播放器实例
   late final player = Player(
     configuration: PlayerConfiguration(
       title: "Simple Live Player",
+      // 设置项以 MB 存储，PlayerConfiguration 需要字节。
+      // 该值同时作为 demuxer-max-bytes / demuxer-max-back-bytes，
+      // 缓冲区越大，网络抖动时越不容易耗尽待播数据。
+      bufferSize:
+          AppSettingsController.instance.playerBufferSize.value * 1024 * 1024,
       logLevel: AppSettingsController.instance.logEnable.value
           ? MPVLogLevel.info
           : MPVLogLevel.error,
@@ -47,6 +68,10 @@ mixin PlayerMixin {
           AppSettingsController.instance.audioOutputDriver.value,
         );
       }
+    }
+    // 网络层自愈：让 mpv 自己重连，而不是每次抖动都重建播放链路
+    if (player.platform is NativePlayer) {
+      await pp.setProperty('stream-lavf-o', kStreamReconnectOptions);
     }
     // media_kit 仓库更新导致的问题，临时解决办法
     if(Platform.isAndroid){
@@ -674,6 +699,7 @@ class PlayerController extends BaseController
   StreamSubscription? _heightSubscription;
   StreamSubscription? _logSubscription;
   StreamSubscription? _playingSubscription;
+  StreamSubscription<bool>? _bufferingSubscription;
 
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
@@ -685,6 +711,10 @@ class PlayerController extends BaseController
       }
       //SmartDialog.showToast(event);
       mediaError(event);
+    });
+
+    _bufferingSubscription = player.stream.buffering.listen((event) {
+      onBufferingChanged(event);
     });
 
     _playingSubscription = player.stream.playing.listen((event) {
@@ -725,6 +755,7 @@ class PlayerController extends BaseController
     _logSubscription?.cancel();
     _pipSubscription?.cancel();
     _playingSubscription?.cancel();
+    _bufferingSubscription?.cancel();
   }
 
   void mediaEnd() {
@@ -737,6 +768,9 @@ class PlayerController extends BaseController
 
   /// 播放状态变化。子类可覆盖以在恢复播放时重置重试计数等状态。
   void onPlayingChanged(bool playing) {}
+
+  /// 缓冲状态变化。子类可覆盖以区分「mpv 正在自愈」与「地址失效」。
+  void onBufferingChanged(bool buffering) {}
 
   void showDebugInfo() {
     Utils.showBottomSheet(

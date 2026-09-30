@@ -66,6 +66,10 @@ class TestController extends LiveRoomController {
   @override
   Duration get recoveryBurstWindow => Duration.zero;
 
+  /// 看门狗在测试里用很短时限；其数值本身由专门用例断言。
+  @override
+  Duration get bufferingWatchdogTimeout => const Duration(milliseconds: 20);
+
   @override
   Future<void> initPlaylist() async {
     playlistOpens++;
@@ -278,7 +282,7 @@ void main() {
       pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
       pRoomId: '1',
     );
-    c.seed();
+    seed(c);
 
     // 第一轮恢复（取址 + 重建播放列表）
     c.mediaEnd();
@@ -300,7 +304,7 @@ void main() {
       pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
       pRoomId: '1',
     );
-    c.seed();
+    seed(c);
 
     c.mediaEnd();
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -330,6 +334,86 @@ void main() {
     expect(c.recoveryDelayFor(4), const Duration(seconds: 4));
     expect(c.recoveryDelayFor(20), const Duration(seconds: 30), reason: '必须封顶');
   });
+
+  test('缓冲后恢复播放不触发任何重建', () async {
+    // mpv 层开启重连后，短暂抖动表现为 buffering 而非 error。
+    // 此时必须什么都不做，否则会打断本来能自愈的连接。
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.onBufferingChanged(true);
+    c.onBufferingChanged(false); // mpv 自愈
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    expect(c.playerJumps, 0, reason: '自愈的抖动不应重建播放链路');
+    expect(fake.fetchCount, 0, reason: '自愈的抖动不应重新取址');
+  });
+
+  test('缓冲超时后升级到重新取址', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.onBufferingChanged(true);
+    // 不恢复播放，等看门狗超时
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(fake.fetchCount, 1, reason: '持续缓冲应判定地址失效并重新取址');
+  });
+
+  test('缓冲结束后看门狗不再触发', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.onBufferingChanged(true);
+    c.onBufferingChanged(false);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(fake.fetchCount, 0, reason: '缓冲已结束，看门狗必须被取消');
+  });
+
+  test('单次断流最多一次原地重载，随后直接换地址', () async {
+    // 旧实现是「2 次原地重载 + 逐条换线路 + 3 次换地址」，
+    // 每级都会重建画面，用户看到的就是反复停顿。
+    var fake = FakeSite(urlsAvailable: true);
+    var c = TestController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
+    c.mediaErrorRetryCount = 0;
+
+    // 第一次：原地重载
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(c.playerJumps, 1);
+    expect(fake.fetchCount, 0);
+
+    // 第二次：不再换线路，直接重新取址
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(fake.fetchCount, 1, reason: '第二次失败应直接重新取址');
+  });
+}
+
+/// 置为「正在播放中」并沿用 TestController 的测试默认值。
+void seed(LiveRoomController c) {
+  c.detail.value = LiveRoomDetail(
+      roomId: '1',
+      title: 't',
+      cover: '',
+      userName: 'u',
+      userAvatar: '',
+      online: 1,
+      status: true,
+      data: '',
+      url: '',
+      isRecord: false);
+  c.qualites.value = [LivePlayQuality(quality: '高清', data: 'x')];
+  c.currentQuality = 0;
+  c.liveStatus.value = true;
+  c.playUrls.value = ['http://old/1.flv', 'http://old/2.flv'];
+  c.currentLineIndex = 1;
+  c.mediaErrorRetryCount = 2;
 }
 
 /// 保留真实退避参数、但不真正等待的控制器。
@@ -350,26 +434,6 @@ class _BurstController extends TestController {
   @override
   Duration get recoveryBurstWindow => const Duration(seconds: 5);
 
-  /// 置为「正在播放中」并沿用 TestController 的测试默认值。
-  void seed() {
-    detail.value = LiveRoomDetail(
-        roomId: '1',
-        title: 't',
-        cover: '',
-        userName: 'u',
-        userAvatar: '',
-        online: 1,
-        status: true,
-        data: '',
-        url: '',
-        isRecord: false);
-    qualites.value = [LivePlayQuality(quality: '高清', data: 'x')];
-    currentQuality = 0;
-    liveStatus.value = true;
-    playUrls.value = ['http://old/1.flv', 'http://old/2.flv'];
-    currentLineIndex = 1;
-    mediaErrorRetryCount = 2;
-  }
 }
 
 /// 测试用 wakelock 实现
