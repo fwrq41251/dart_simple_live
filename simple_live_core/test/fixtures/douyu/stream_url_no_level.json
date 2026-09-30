@@ -1,0 +1,43 @@
+{
+  "error": 0,
+  "msg": "请求正常",
+  "data": {
+    "timestamp": 7200,
+    "thumb_video": {
+      "normal": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/normal_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=9566a15ce8a1fa49dd5857eead91860c&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "2934104344",
+        "bit_rate": 2125899,
+        "name": "标清480P",
+        "stream_type": "normal",
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      },
+      "high": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/high_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=9566a15ce8a1fa49dd5857eead91860c&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "2934104344",
+        "bit_rate": 3124890,
+        "name": "高清720P",
+        "stream_type": "high",
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      },
+      "super": {
+        "url": "http://play-hw-recpub.douyucdn2.cn/live/super_live-9999rMfVyoBTjV0x--20260928125722/playlist.m3u8?cdn=hw&ct=web&d=10000000000000000000000000001501&exper=0&nlimit=5&pt=2&sign=9566a15ce8a1fa49dd5857eead91860c&tlink=6abb9178&tplay=6abc1e18&ts=6abb7558&u=0&vid=45521928",
+        "fsize": "2934104344",
+        "bit_rate": 8131628,
+        "name": "高清1080P",
+        "stream_type": "super",
+        "stream_format": "264",
+        "now_free": 0,
+        "has_pms": 1
+      }
+    },
+    "p2pmeta": {
+      "p2p": 0
+    },
+    "cdn": "hw"
+  }
+}

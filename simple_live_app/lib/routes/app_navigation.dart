@@ -56,8 +56,11 @@ class AppNavigator {
   }
 
   /// 跳转至回放列表
-  static void toReplayList({required Site site, required String roomId}) {
-    Get.toNamed(RoutePath.kReplayList, arguments: site, parameters: {
+  static Future<void> toReplayList({
+    required Site site,
+    required String roomId,
+  }) async {
+    await Get.toNamed(RoutePath.kReplayList, arguments: site, parameters: {
       "roomId": roomId,
     });
   }
