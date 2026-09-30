@@ -48,6 +48,14 @@ class TestController extends LiveRoomController {
 
   int playlistOpens = 0;
   int replayStops = 0;
+  int playerJumps = 0;
+  Completer<void>? pendingJump;
+
+  @override
+  Duration get stablePlaybackDuration => const Duration(milliseconds: 20);
+
+  @override
+  Duration get recoveryRetryDelay => Duration.zero;
 
   @override
   Future<void> initPlaylist() async {
@@ -60,10 +68,15 @@ class TestController extends LiveRoomController {
   }
 
   @override
-  void setPlayer() async {}
+  Future<void> setPlayer() async {
+    playerJumps++;
+    if (pendingJump case final pending?) {
+      await pending.future;
+    }
+  }
 
   @override
-  void changePlayLine(int index) {
+  Future<void> changePlayLine(int index) async {
     currentLineIndex = index;
     mediaErrorRetryCount = 0;
   }
@@ -145,13 +158,57 @@ void main() {
     expect(c.liveStatus.value, true);
   });
 
-  test('播放恢复时重置重试计数', () async {
+  test('短暂 playing 事件不会立即清空重试状态', () async {
     var fake = FakeSite(urlsAvailable: true);
     var c = build(fake);
 
     c.onPlayingChanged(true);
+    expect(c.mediaErrorRetryCount, 2);
 
+    c.onPlayingChanged(false);
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
+    expect(c.mediaErrorRetryCount, 2);
+  });
+
+  test('连续稳定播放后才重置重试状态', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.onPlayingChanged(true);
+    expect(c.mediaErrorRetryCount, 2);
+
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
     expect(c.mediaErrorRetryCount, 0);
+  });
+
+  test('error 与 completed 同时触发时只运行一个恢复流程', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+    c.mediaErrorRetryCount = 0;
+    c.pendingJump = Completer<void>();
+
+    c.mediaEnd();
+    c.mediaError('same failure');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(c.playerJumps, 1);
+    expect(c.mediaErrorRetryCount, 1);
+
+    c.pendingJump!.complete();
+    await Future<void>.delayed(Duration.zero);
+  });
+
+  test('连续失效的新地址达到上限后停止自动重开', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    for (var i = 0; i < 6; i++) {
+      c.mediaEnd();
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(fake.fetchCount, 3);
+    expect(c.playlistOpens, 3);
   });
 
   test('进入回放只停止一次直播，返回后只恢复一次', () async {

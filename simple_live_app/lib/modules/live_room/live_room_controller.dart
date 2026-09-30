@@ -188,6 +188,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   // 弹窗逻辑
 
   void refreshRoom() {
+    _resetRecoveryState();
     //messages.clear();
     superChats.clear();
     liveDanmaku.stop();
@@ -425,7 +426,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     return qualityLevel;
   }
 
-  Future<bool> getPlayUrl({bool notifyError = true}) async {
+  Future<bool> getPlayUrl({
+    bool notifyError = true,
+    bool resetRecovery = true,
+  }) async {
+    if (resetRecovery) {
+      _resetRecoveryState();
+    }
     var generation = _playbackGeneration;
     if (qualites.isEmpty ||
         currentQuality < 0 ||
@@ -460,11 +467,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     return _isCurrentPlaybackGeneration(generation);
   }
 
-  void changePlayLine(int index) {
+  Future<void> changePlayLine(int index) async {
+    _resetRecoveryState();
     currentLineIndex = index;
-    //重置错误次数
-    mediaErrorRetryCount = 0;
-    setPlayer();
+    await setPlayer();
   }
 
   Future<void> initPlaylist() async {
@@ -492,7 +498,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     await player.open(Playlist(mediaList));
   }
 
-  void setPlayer() async {
+  Future<void> setPlayer() async {
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     errorMsg.value = "";
 
@@ -500,115 +506,150 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   @override
-  void mediaEnd() async {
+  void mediaEnd() {
     super.mediaEnd();
-    if (mediaErrorRetryCount < 2) {
-      Log.d("播放结束，尝试第${mediaErrorRetryCount + 1}次刷新");
-      if (mediaErrorRetryCount == 1) {
-        //延迟一秒再刷新
-        await Future.delayed(const Duration(seconds: 1));
-      }
-      mediaErrorRetryCount += 1;
-      //刷新一次
-      setPlayer();
-      return;
-    }
-
-    Log.d("播放结束");
-    // 遍历线路，如果全部链接都断开就是直播结束了
-    if (playUrls.length - 1 == currentLineIndex) {
-      // 地址失效与真正下播在这里无法区分，先重新获取地址重试。
-      // 只有重新获取后仍然失败（_maxFreshUrlAttempts 次用尽），才判定直播结束。
-      retryWithFreshUrls("播放结束");
-    } else {
-      changePlayLine(currentLineIndex + 1);
-
-      //setPlayer();
-    }
+    unawaited(_recoverPlayback("播放结束"));
   }
 
   int mediaErrorRetryCount = 0;
-  @override
-  void mediaError(String error) async {
-    super.mediaError(error);
-    if (mediaErrorRetryCount < 2) {
-      Log.d("播放失败，尝试第${mediaErrorRetryCount + 1}次刷新");
-      if (mediaErrorRetryCount == 1) {
-        //延迟一秒再刷新
-        await Future.delayed(const Duration(seconds: 1));
-      }
-      mediaErrorRetryCount += 1;
-      //刷新一次
-      setPlayer();
-      return;
-    }
 
-    if (playUrls.length - 1 == currentLineIndex) {
-      // 所有线路都失败，播放地址很可能已失效（斗鱼等平台的地址带时效鉴权）。
-      // 重新获取地址再试，而不是直接判定直播结束。
-      retryWithFreshUrls("播放失败:$error");
-    } else {
-      //currentLineIndex += 1;
-      //setPlayer();
-      changePlayLine(currentLineIndex + 1);
-    }
+  @override
+  void mediaError(String error) {
+    super.mediaError(error);
+    unawaited(_recoverPlayback("播放失败:$error"));
   }
 
-  /// 重试计数器用尽后，重新获取播放地址。
-  ///
-  /// 各平台的播放地址通常带时效性鉴权参数，长时间播放后失效是正常现象。
-  /// 此时复用旧地址重试必然再次失败，必须重新向平台请求。
-  /// 重新请求仍拿不到地址，才说明直播确实结束了。
-  bool _fetchingFreshUrls = false;
+  /// 同一断流只允许一个恢复流程，避免 error/completed 重复触发重开。
+  bool _recoveringPlayback = false;
+  bool _awaitingStablePlayback = false;
+  bool _automaticRecoveryExhausted = false;
+  bool _reportedPlaying = false;
+  Timer? _stablePlaybackTimer;
   int _freshUrlAttempts = 0;
   static const int _maxFreshUrlAttempts = 3;
 
-  void retryWithFreshUrls(String failMessage) async {
-    // 并发保护：error/completed 事件可能连续触发
-    if (_fetchingFreshUrls) {
+  @protected
+  Duration get stablePlaybackDuration => const Duration(seconds: 10);
+
+  @protected
+  Duration get recoveryRetryDelay => const Duration(seconds: 1);
+
+  Future<void> _recoverPlayback(String failMessage) async {
+    _reportedPlaying = false;
+    _stablePlaybackTimer?.cancel();
+    if (_replaySuspended ||
+        isClosed ||
+        !liveStatus.value ||
+        _automaticRecoveryExhausted ||
+        _recoveringPlayback) {
       return;
     }
-    _fetchingFreshUrls = true;
+
+    var generation = _playbackGeneration;
+    _recoveringPlayback = true;
     try {
-      _freshUrlAttempts += 1;
-      Log.d("播放地址可能已失效，重新获取（第$_freshUrlAttempts/$_maxFreshUrlAttempts 次）");
-      if (_freshUrlAttempts > 1) {
-        await Future.delayed(const Duration(seconds: 1));
-      }
-      // getPlayUrl 内部会重置 mediaErrorRetryCount 并重建播放列表
-      bool ok;
-      try {
-        ok = await getPlayUrl(notifyError: false);
-      } catch (e) {
-        // 重新请求地址失败（房间已下播时平台接口会报错），判定直播结束
-        Log.logPrint(e);
-        ok = false;
-      }
-      if (!ok) {
-        // 重新请求也拿不到地址，判定直播结束
-        _freshUrlAttempts = 0;
-        mediaErrorRetryCount = 0;
-        liveStatus.value = false;
+      // 新地址尚未稳定时再次失败，直接换新地址，不再反复 jump 同一地址。
+      if (!_awaitingStablePlayback && mediaErrorRetryCount < 2) {
+        mediaErrorRetryCount += 1;
+        Log.d("播放中断，尝试第$mediaErrorRetryCount次重载当前线路");
+        if (mediaErrorRetryCount > 1) {
+          await Future.delayed(recoveryRetryDelay);
+        }
+        if (!_isCurrentPlaybackGeneration(generation)) {
+          return;
+        }
+        await setPlayer();
         return;
       }
-      if (_freshUrlAttempts >= _maxFreshUrlAttempts) {
-        // 反复失效，不再无限重试
-        _freshUrlAttempts = 0;
-        errorMsg.value = failMessage;
-        SmartDialog.showToast(failMessage);
+
+      if (!_awaitingStablePlayback &&
+          currentLineIndex >= 0 &&
+          currentLineIndex < playUrls.length - 1) {
+        currentLineIndex += 1;
+        mediaErrorRetryCount = 0;
+        Log.d("当前线路不可用，切换至线路${currentLineIndex + 1}");
+        await setPlayer();
+        return;
+      }
+
+      await retryWithFreshUrls(failMessage, generation);
+    } catch (e) {
+      Log.logPrint(e);
+      if (_isCurrentPlaybackGeneration(generation)) {
+        await retryWithFreshUrls(failMessage, generation);
       }
     } finally {
-      _fetchingFreshUrls = false;
+      _recoveringPlayback = false;
     }
+  }
+
+  /// 旧地址与所有线路均失效后，重新向平台请求播放地址。
+  Future<void> retryWithFreshUrls(
+    String failMessage,
+    int generation,
+  ) async {
+    if (!_isCurrentPlaybackGeneration(generation)) {
+      return;
+    }
+    if (_freshUrlAttempts >= _maxFreshUrlAttempts) {
+      _automaticRecoveryExhausted = true;
+      _awaitingStablePlayback = false;
+      errorMsg.value = failMessage;
+      SmartDialog.showToast("$failMessage，自动恢复已停止，请手动刷新");
+      return;
+    }
+
+    _freshUrlAttempts += 1;
+    Log.d("播放地址可能已失效，重新获取（第$_freshUrlAttempts/$_maxFreshUrlAttempts 次）");
+    if (_freshUrlAttempts > 1) {
+      await Future.delayed(recoveryRetryDelay);
+    }
+    if (!_isCurrentPlaybackGeneration(generation)) {
+      return;
+    }
+
+    bool ok;
+    try {
+      ok = await getPlayUrl(
+        notifyError: false,
+        resetRecovery: false,
+      );
+    } catch (e) {
+      Log.logPrint(e);
+      ok = false;
+    }
+    if (!ok) {
+      _resetRecoveryState();
+      liveStatus.value = false;
+      return;
+    }
+
+    // playing=true 可能只是 open/jump 的瞬时事件；稳定计时结束前不清空重试状态。
+    _awaitingStablePlayback = true;
+  }
+
+  void _resetRecoveryState() {
+    _stablePlaybackTimer?.cancel();
+    _reportedPlaying = false;
+    mediaErrorRetryCount = 0;
+    _freshUrlAttempts = 0;
+    _awaitingStablePlayback = false;
+    _automaticRecoveryExhausted = false;
   }
 
   @override
   void onPlayingChanged(bool playing) {
-    if (playing) {
-      // 恢复正常播放，重置所有重试计数
-      mediaErrorRetryCount = 0;
-      _freshUrlAttempts = 0;
+    _reportedPlaying = playing;
+    _stablePlaybackTimer?.cancel();
+    if (!playing || _replaySuspended || isClosed) {
+      return;
     }
+    _stablePlaybackTimer = Timer(stablePlaybackDuration, () {
+      if (_reportedPlaying && !_replaySuspended && !isClosed) {
+        Log.d("播放已稳定，重置断流恢复状态");
+        _resetRecoveryState();
+      }
+    });
   }
 
   /// 读取SC
@@ -1119,6 +1160,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
     _replaySuspended = true;
+    _resetRecoveryState();
     _playbackGeneration++;
     liveDanmaku.stop();
     await stopPlayerForReplay();
@@ -1154,6 +1196,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
 
+    _resetRecoveryState();
     rxSite.value = site;
     rxRoomId.value = roomId;
     _playbackGeneration++;
@@ -1237,6 +1280,7 @@ ${error?.toString()}
     WidgetsBinding.instance.removeObserver(this);
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();
+    _stablePlaybackTimer?.cancel();
     _replaySuspended = true;
 
     liveDanmaku.stop();
