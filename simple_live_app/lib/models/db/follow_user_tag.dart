@@ -15,10 +15,14 @@ class FollowUserTag {
   @HiveField(3)
   List<String> userId;
 
+  @HiveField(4)
+  int? order;
+
   FollowUserTag({
     required this.id,
     required this.tag,
     required this.userId,
+    this.order,
   });
 
   factory FollowUserTag.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,7 @@ class FollowUserTag {
       id: json['id'],
       tag: json['tag'],
       userId: List<String>.from(json['userId']),
+      order: json['order'] as int?,
     );
   }
 
@@ -34,6 +39,7 @@ class FollowUserTag {
       'id': id,
       'tag': tag,
       'userId': userId,
+      'order': order,
     };
   }
 
@@ -41,11 +47,13 @@ class FollowUserTag {
     String? id,
     String? tag,
     List<String>? userId,
+    int? order,
   }) {
     return FollowUserTag(
       id: id ?? this.id,
       tag: tag ?? this.tag,
       userId: userId ?? this.userId,
+      order: order ?? this.order,
     );
   }
 }

@@ -20,7 +20,36 @@ class DBService extends GetxService {
     historyBox = await Hive.openBox("History");
     followBox = await Hive.openBox("FollowUser");
     tagBox = await Hive.openBox("FollowUserTag");
+    await _migrateFollowTagKeys();
     replayProgressBox = await Hive.openBox("ReplayProgress");
+  }
+
+  Future<void> _migrateFollowTagKeys() async {
+    final tagsById = <String, FollowUserTag>{};
+    var needsMigration = false;
+
+    for (final key in tagBox.keys) {
+      final followTag = tagBox.get(key);
+      if (followTag == null) {
+        continue;
+      }
+      needsMigration = needsMigration ||
+          key != followTag.id ||
+          followTag.order == null ||
+          tagsById.containsKey(followTag.id);
+      if (key == followTag.id || !tagsById.containsKey(followTag.id)) {
+        tagsById[followTag.id] = followTag;
+      }
+    }
+
+    if (needsMigration) {
+      var order = 0;
+      for (final followTag in tagsById.values) {
+        followTag.order = order++;
+      }
+      await tagBox.clear();
+      await tagBox.putAll(tagsById);
+    }
   }
 
   // follow_user_tag 相关逻辑
@@ -44,7 +73,13 @@ class DBService extends GetxService {
 
   // 获取标签列表
   List<FollowUserTag> getFollowTagList() {
-    return tagBox.values.toList();
+    final tags = tagBox.values.toList();
+    final originalOrder = {
+      for (var index = 0; index < tags.length; index++) tags[index].id: index,
+    };
+    tags.sort((a, b) => (a.order ?? originalOrder[a.id] ?? 0)
+        .compareTo(b.order ?? originalOrder[b.id] ?? 0));
+    return tags;
   }
 
   // 修改标签
@@ -55,19 +90,30 @@ class DBService extends GetxService {
   // 添加标签
   Future<FollowUserTag> addFollowTag(String tag) async {
     // 限制标签唯一且长度不超过8个字符
-    if (getFollowTagExistByTag(tag) && tag.length > 8) {
+    if (getFollowTagExistByTag(tag)) {
       return getFollowTag(tag)!;
     }
+    if (tag.length > 8) {
+      throw ArgumentError.value(tag, 'tag', '标签名称不能超过8个字符');
+    }
     final String uniqueId = uuid.v4();
-    final followUserTag = FollowUserTag(id: uniqueId, tag: tag, userId: []);
+    final followUserTag = FollowUserTag(
+      id: uniqueId,
+      tag: tag,
+      userId: [],
+      order: tagBox.length,
+    );
     await tagBox.put(uniqueId, followUserTag);
     return followUserTag;
   }
 
   // 调整标签顺序
   Future updateFollowTagOrder(List<FollowUserTag> userTagList) async {
-    final Map<int, FollowUserTag> updatedMap = {
-      for (int i = 0; i < userTagList.length; i++) i: userTagList[i]
+    for (var i = 0; i < userTagList.length; i++) {
+      userTagList[i].order = i;
+    }
+    final Map<String, FollowUserTag> updatedMap = {
+      for (final followTag in userTagList) followTag.id: followTag,
     };
     await tagBox.clear();
     await tagBox.putAll(updatedMap);
