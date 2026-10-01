@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -16,10 +15,9 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/archive.dart';
 import 'package:simple_live_app/app/utils/document.dart';
-import 'package:simple_live_app/models/db/follow_user.dart';
-import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/webdav_client.dart';
+import 'package:simple_live_app/modules/sync/remote_sync/webdav/webdav_recovery.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
@@ -226,111 +224,115 @@ class RemoteSyncWebDAVController extends BaseController {
   }
 
   // webDAV恢复到本地
-  void doWebDAVRecovery() async {
+  Future<void> doWebDAVRecovery() async {
     SmartDialog.showLoading(msg: "正在恢复到本地");
-    final data = await davClient.recovery();
-    final archive = await Isolate.run<Archive>(() {
-      final zipDecoder = ZipDecoder();
-      return zipDecoder.decodeBytes(data);
-    });
-    for (ArchiveFile file in archive) {
-      await _recovery(file);
-    }
-    SmartDialog.dismiss();
-    SmartDialog.showToast('同步完成');
-    DateTime recoverTime = DateTime.now();
-    lastRecoverTime.value = Utils.parseTime(recoverTime);
-    LocalStorageService.instance.setValue(
+    try {
+      final data = await davClient.recovery();
+      final selection = WebDavRecoverySelection(
+        follows: isSyncFollows.value,
+        histories: isSyncHistories.value,
+        blockedWords: isSyncBlockWord.value,
+        bilibiliAccount: isSyncBilibiliAccount.value,
+      );
+      final plan = WebDavRecoveryParser().parse(data, selection);
+      await _commitRecovery(plan);
+
+      final recoverTime = DateTime.now();
+      await LocalStorageService.instance.setValue(
         LocalStorageService.kWebDAVLastRecoverTime,
-        recoverTime.millisecondsSinceEpoch);
+        recoverTime.millisecondsSinceEpoch,
+      );
+      lastRecoverTime.value = Utils.parseTime(recoverTime);
+      SmartDialog.showToast('同步完成');
+    } catch (e, stackTrace) {
+      Log.e('恢复失败: $e', stackTrace);
+      SmartDialog.showToast('恢复失败，原有数据已尽可能保留');
+    } finally {
+      SmartDialog.dismiss();
+    }
   }
 
-  Future<void> _recovery(ArchiveFile file) async {
-    if (file.isFile && file.name.endsWith('.json')) {
-      var jsonString = utf8.decode(file.content);
-      var jsonData = json.decode(jsonString)['data'];
-      // 同步follows
-      if (file.name == _userFollowJsonName && isSyncFollows.value) {
-        // 当前云优先
-        try {
-          // 清空本地关注列表
-          await DBService.instance.followBox.clear();
-          for (var item in jsonData) {
-            var user = FollowUser.fromJson(item);
-            await DBService.instance.followBox.put(user.id, user);
-          }
-          Log.i('已同步关注用户列表');
-        } catch (e) {
-          Log.e('同步关注用户列表失败: $e', StackTrace.current);
-        }
-      } else if (file.name == _userHistoriesJsonName && isSyncHistories.value) {
-        try {
-          for (var item in jsonData) {
-            var history = History.fromJson(item);
-            if (DBService.instance.historyBox.containsKey(history.id)) {
-              var old = DBService.instance.historyBox.get(history.id);
-              //如果本地的更新时间比较新，就不更新
-              if (old!.updateTime.isAfter(history.updateTime)) {
-                continue;
-              }
-            }
-            await DBService.instance.addOrUpdateHistory(history);
-          }
-          Log.i('已同步用户观看历史记录');
-        } catch (e) {
-          Log.e('同步用户观看历史记录失败: $e', StackTrace.current);
-        }
-      } else if (file.name == _userBlockedWordJsonName &&
-          isSyncBlockWord.value) {
-        try {
-          for (var keyword in jsonData) {
-            AppSettingsController.instance.addShieldList(keyword.trim());
-          }
-          Log.i('已同步用户屏蔽词');
-        } catch (e) {
-          Log.e('同步用户屏蔽词失败:$e', StackTrace.current);
-        }
-      } else if (file.name == _userBilibiliAccountJsonName &&
-          isSyncBilibiliAccount.value) {
-        try {
-          var cookie = jsonData['cookie'];
-          BiliBiliAccountService.instance.setCookie(cookie);
-          BiliBiliAccountService.instance.loadUserInfo();
-          Log.i('已同步哔哩哔哩账号');
-        } catch (e) {
-          Log.e('同步哔哩哔哩账号失败：$e', StackTrace.current);
-        }
-      } else if (file.name == _userSettingsJsonName) {
-        try {
-          await LocalStorageService.instance.settingsBox.clear();
-          LocalStorageService.instance.settingsBox.putAll(jsonData);
-          Log.i('已同步用户设置');
-        } catch (e) {
-          Log.e("同步用户设置失败：$e", StackTrace.current);
-        }
-      } else if (file.name == _userTagsJsonName && isSyncFollows.value) {
-        try {
-          // 标签功能和关注具有依赖关系，必须同时同步
-          // 清空本地标签列表
-          await DBService.instance.tagBox.clear();
-          for (var item in jsonData) {
-            var tag = FollowUserTag.fromJson(item);
-            await DBService.instance.tagBox.put(tag.id, tag);
-            // 插入之后验证
-            var insertedTag = DBService.instance.tagBox.get(tag.id);
-            Log.i('Inserted tag: ${insertedTag?.tag}');
-          }
-          EventBus.instance.emit(Constant.kUpdateFollow, 0);
-          Log.i('已同步用户自定义标签');
-        } catch (e) {
-          Log.e('同步用户自定义标签失败:$e', StackTrace.current);
-        }
-      } else {
-        return;
+  Future<void> _commitRecovery(WebDavRecoveryPlan plan) async {
+    final db = DBService.instance;
+    final storage = LocalStorageService.instance;
+    final followSnapshot = db.followBox.toMap();
+    final tagSnapshot = db.tagBox.toMap();
+    final historySnapshot = db.historyBox.toMap();
+    final shieldSnapshot = storage.shieldBox.toMap();
+    final settingsSnapshot = storage.settingsBox.toMap();
+    final oldCookie = BiliBiliAccountService.instance.cookie;
+    final histories = Map<dynamic, History>.from(historySnapshot);
+    for (final history in plan.histories ?? const <History>[]) {
+      final old = histories[history.id];
+      if (old == null || !old.updateTime.isAfter(history.updateTime)) {
+        histories[history.id] = history;
       }
-    } else {
-      Log.i('不是正确的文件名');
     }
+
+    Future<void> replace(box, Map<dynamic, dynamic> values) async {
+      await box.clear();
+      await box.putAll(values);
+    }
+
+    final steps = <RecoveryCommitStep>[
+      if (plan.follows != null)
+        RecoveryCommitStep(
+          apply: () => replace(
+            db.followBox,
+            {for (final item in plan.follows!) item.id: item},
+          ),
+          rollback: () => replace(db.followBox, followSnapshot),
+        ),
+      if (plan.tags != null)
+        RecoveryCommitStep(
+          apply: () => replace(
+            db.tagBox,
+            {for (final item in plan.tags!) item.id: item},
+          ),
+          rollback: () => replace(db.tagBox, tagSnapshot),
+        ),
+      if (plan.histories != null)
+        RecoveryCommitStep(
+          apply: () => replace(db.historyBox, histories),
+          rollback: () => replace(db.historyBox, historySnapshot),
+        ),
+      if (plan.blockedWords != null)
+        RecoveryCommitStep(
+          apply: () => replace(storage.shieldBox,
+              {for (final word in plan.blockedWords!) word: word}),
+          rollback: () => replace(storage.shieldBox, shieldSnapshot),
+        ),
+      if (plan.settings != null)
+        RecoveryCommitStep(
+          apply: () => replace(storage.settingsBox, plan.settings!),
+          rollback: () => replace(storage.settingsBox, settingsSnapshot),
+        ),
+      if (plan.bilibiliCookie != null)
+        RecoveryCommitStep(
+          apply: () async {
+            await storage.setValue(
+                LocalStorageService.kBilibiliCookie, plan.bilibiliCookie!);
+          },
+          rollback: () async {
+            await storage.setValue(
+                LocalStorageService.kBilibiliCookie, oldCookie);
+          },
+        ),
+    ];
+    await commitRecovery(steps);
+
+    if (plan.blockedWords != null) {
+      AppSettingsController.instance.shieldList
+        ..clear()
+        ..addAll(plan.blockedWords!);
+    }
+    if (plan.bilibiliCookie != null) {
+      BiliBiliAccountService.instance.cookie = plan.bilibiliCookie!;
+      BiliBiliAccountService.instance.logined.value =
+          plan.bilibiliCookie!.isNotEmpty;
+      BiliBiliAccountService.instance.loadUserInfo();
+    }
+    if (plan.follows != null) EventBus.instance.emit(Constant.kUpdateFollow, 0);
   }
 
   // ui控制--密码可见控制
