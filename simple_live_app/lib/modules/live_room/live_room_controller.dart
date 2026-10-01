@@ -300,7 +300,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void loadData() async {
     var generation = ++_playbackGeneration;
     try {
-      SmartDialog.showLoading(msg: "");
+      showRoomLoading();
       loadError.value = false;
       error = null;
       update();
@@ -365,8 +365,18 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       loadError.value = true;
       error = e;
     } finally {
-      SmartDialog.dismiss(status: SmartStatus.loading);
+      if (_isCurrentPlaybackGeneration(generation)) {
+        dismissRoomLoading();
+      }
     }
+  }
+
+  @protected
+  void showRoomLoading() => SmartDialog.showLoading(msg: "");
+
+  @protected
+  void dismissRoomLoading() {
+    SmartDialog.dismiss(status: SmartStatus.loading);
   }
 
   /// 初始化播放器

@@ -112,6 +112,33 @@ class TestController extends LiveRoomController {
   void addSysMsg(String msg) {}
 }
 
+class _LoadingController extends TestController {
+  _LoadingController({required super.pSite, required super.pRoomId});
+
+  int loadingShows = 0;
+  int loadingDismisses = 0;
+
+  @override
+  void showRoomLoading() => loadingShows++;
+
+  @override
+  void dismissRoomLoading() => loadingDismisses++;
+}
+
+class _PendingRoomSite extends FakeSite {
+  _PendingRoomSite() : super(urlsAvailable: false);
+
+  final roomRequests = <Completer<LiveRoomDetail>>[];
+
+  @override
+  Future<LiveRoomDetail> getRoomDetail({required String roomId}) {
+    detailFetchCount++;
+    final request = Completer<LiveRoomDetail>();
+    roomRequests.add(request);
+    return request.future;
+  }
+}
+
 TestController build(FakeSite fake) {
   var c = TestController(
       pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
@@ -161,6 +188,38 @@ void main() {
     expect(fake.fetchCount, 1, reason: '应重新请求一次播放地址');
     expect(c.playlistOpens, 1, reason: '应重建播放列表');
     expect(c.liveStatus.value, true, reason: '不应置为未开播');
+  });
+
+  test('旧房间请求结束时不会关闭新房间的加载提示', () async {
+    var fake = _PendingRoomSite();
+    var controller = _LoadingController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+
+    controller.loadData();
+    controller.loadData();
+    expect(controller.loadingShows, 2);
+    expect(fake.roomRequests, hasLength(2));
+
+    fake.roomRequests.first.complete(
+      LiveRoomDetail(
+        roomId: '1',
+        title: 'stale',
+        cover: '',
+        userName: 'u',
+        userAvatar: '',
+        online: 0,
+        status: false,
+        url: '',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.loadingDismisses, 0);
+
+    fake.roomRequests.last.completeError(StateError('latest failed'));
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.loadingDismisses, 1);
   });
 
   test('播放地址接口失败：有限重试且不误判未开播', () async {
