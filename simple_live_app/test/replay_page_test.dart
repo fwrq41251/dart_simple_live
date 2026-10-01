@@ -1,4 +1,6 @@
 // ignore_for_file: must_call_super
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
@@ -8,6 +10,9 @@ import 'package:simple_live_app/modules/replay/replay_page.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
 class _ReplaySite extends LiveSite implements LiveReplayDanmakuSite {
+  int replayUrlCalls = 0;
+  Completer<LiveReplayUrl>? pendingReplayUrl;
+
   @override
   String get id => 'douyu';
 
@@ -19,6 +24,10 @@ class _ReplaySite extends LiveSite implements LiveReplayDanmakuSite {
     required String roomId,
     required String hashId,
   }) async {
+    replayUrlCalls++;
+    if (pendingReplayUrl case final pending?) {
+      return pending.future;
+    }
     return LiveReplayUrl(
       qualities: [
         LiveReplayQuality(quality: 'high', name: '高清', url: 'high'),
@@ -72,6 +81,9 @@ class _TestReplayController extends ReplayController {
   int? savedProgress;
   final writtenProgress = <int>[];
   var removedProgressCount = 0;
+  var openCount = 0;
+
+  _ReplaySite get replaySite => site.liveSite as _ReplaySite;
 
   @override
   void onInit() {}
@@ -88,6 +100,7 @@ class _TestReplayController extends ReplayController {
 
   @override
   Future<void> playCurrent({Duration? start, bool play = true}) async {
+    openCount++;
     openedAt = start;
     openedPlaying = play;
   }
@@ -225,6 +238,28 @@ void main() {
 
     expect(controller.openedAt, const Duration(minutes: 18, seconds: 21));
     expect(controller.position.value, const Duration(minutes: 18, seconds: 21));
+  });
+
+  test('并发重试共用同一次回放地址加载和播放器打开', () async {
+    var controller = Get.find<ReplayController>() as _TestReplayController;
+    controller.replaySite.pendingReplayUrl = Completer<LiveReplayUrl>();
+
+    var first = controller.loadData();
+    var second = controller.loadData();
+    expect(identical(first, second), isTrue);
+    expect(controller.replaySite.replayUrlCalls, 1);
+
+    controller.replaySite.pendingReplayUrl!.complete(
+      LiveReplayUrl(
+        qualities: [
+          LiveReplayQuality(quality: 'high', name: '高清', url: 'high'),
+        ],
+      ),
+    );
+    await Future.wait([first, second]);
+
+    expect(controller.openCount, 1);
+    expect(controller.loading.value, isFalse);
   });
 
   test('短进度不保存，正常进度保存，接近结尾时清除', () async {

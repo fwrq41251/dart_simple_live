@@ -115,6 +115,7 @@ class ReplayController extends BaseController with WindowListener {
   StreamSubscription? _completedSubscription;
   Future<void> _playerOperations = Future<void>.value();
   Future<void> _progressOperations = Future<void>.value();
+  Future<void>? _loadDataFuture;
   Future<void>? _prepareForExitFuture;
   DateTime? _lastProgressSavedAt;
   bool _closing = false;
@@ -176,7 +177,16 @@ class ReplayController extends BaseController with WindowListener {
   }
 
   /// 读取回放地址
-  Future<void> loadData() async {
+  Future<void> loadData() {
+    if (_closing) {
+      return Future<void>.value();
+    }
+    return _loadDataFuture ??= _loadData().whenComplete(() {
+      _loadDataFuture = null;
+    });
+  }
+
+  Future<void> _loadData() async {
     if (_closing) {
       return;
     }
