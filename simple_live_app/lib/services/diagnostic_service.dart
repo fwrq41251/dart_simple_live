@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
+import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
@@ -46,11 +47,18 @@ class DiagnosticService extends GetxService {
     addEvent('播放器错误: $error');
   }
 
+  void recordRecoveryTiming(String stage, Duration elapsed) {
+    addEvent('恢复计时: $stage +${elapsed.inMilliseconds}ms');
+  }
+
+  List<String> get events => List.unmodifiable(_events);
+
   void addEvent(String event) {
     _events.add('${DateTime.now().toIso8601String()} $event');
     if (_events.length > 30) {
       _events.removeAt(0);
     }
+    Log.d('诊断: $event');
   }
 
   Future<String> buildReport() async {

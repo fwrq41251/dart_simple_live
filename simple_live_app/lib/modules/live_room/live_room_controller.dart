@@ -84,6 +84,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 当前线路
   var currentLineIndex = -1;
   var currentLineInfo = "".obs;
+  int _stalePlaylistEntries = 0;
 
   /// 退出倒计时
   var countdown = 60.obs;
@@ -109,6 +110,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 进入回放列表后暂停直播，避免两个播放器同时输出音频。
   bool _replaySuspended = false;
   int _playbackGeneration = 0;
+  Timer? _douyuPlayUrlPrefetchTimer;
+  LivePlayUrl? _prefetchedDouyuPlayUrl;
+  DateTime? _prefetchedDouyuPlayUrlAt;
+  int _douyuPlayUrlPrefetchGeneration = 0;
 
   bool _isCurrentPlaybackGeneration(int generation) =>
       generation == _playbackGeneration && !_replaySuspended && !isClosed;
@@ -465,14 +470,21 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     var stopwatch = Stopwatch()..start();
     LivePlayUrl playUrl;
     try {
-      playUrl = await site.liveSite.getPlayUrls(
-        detail: detail.value!,
-        quality: qualites[currentQuality],
-      );
+      var prefetched = resetRecovery ? null : _takePrefetchedDouyuPlayUrl();
+      playUrl = prefetched ??
+          await site.liveSite.getPlayUrls(
+            detail: detail.value!,
+            quality: qualites[currentQuality],
+          );
       DiagnosticService.instance.recordUrlRequest(
         stopwatch.elapsed,
-        playUrl.urls.isEmpty ? '无可用地址' : '成功',
+        playUrl.urls.isEmpty
+            ? '无可用地址'
+            : prefetched == null
+                ? '成功'
+                : '预取缓存命中',
       );
+      _recordRecoveryTiming('新地址就绪');
     } on DioException catch (e) {
       DiagnosticService.instance.recordUrlRequest(
         stopwatch.elapsed,
@@ -505,7 +517,72 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     //重置错误次数
     mediaErrorRetryCount = 0;
     await initPlaylist();
+    if (_isCurrentPlaybackGeneration(generation)) {
+      _scheduleDouyuPlayUrlPrefetch();
+    }
     return _isCurrentPlaybackGeneration(generation);
+  }
+
+  @protected
+  Duration get douyuPlayUrlPrefetchDelay => const Duration(minutes: 4);
+
+  @protected
+  Duration get douyuPlayUrlPrefetchMaxAge => const Duration(minutes: 2);
+
+  LivePlayUrl? _takePrefetchedDouyuPlayUrl() {
+    if (site.liveSite is! DouyuSite) {
+      return null;
+    }
+    var playUrl = _prefetchedDouyuPlayUrl;
+    var prefetchedAt = _prefetchedDouyuPlayUrlAt;
+    _prefetchedDouyuPlayUrl = null;
+    _prefetchedDouyuPlayUrlAt = null;
+    if (playUrl == null || prefetchedAt == null) {
+      return null;
+    }
+    if (DateTime.now().difference(prefetchedAt) > douyuPlayUrlPrefetchMaxAge) {
+      return null;
+    }
+    return playUrl;
+  }
+
+  void _scheduleDouyuPlayUrlPrefetch() {
+    _douyuPlayUrlPrefetchTimer?.cancel();
+    _prefetchedDouyuPlayUrl = null;
+    _prefetchedDouyuPlayUrlAt = null;
+    var prefetchGeneration = ++_douyuPlayUrlPrefetchGeneration;
+    if (site.liveSite is! DouyuSite ||
+        detail.value == null ||
+        currentQuality < 0 ||
+        currentQuality >= qualites.length) {
+      return;
+    }
+    var playbackGeneration = _playbackGeneration;
+    var douyuSite = site.liveSite as DouyuSite;
+    var roomDetail = detail.value!;
+    var quality = qualites[currentQuality];
+    _douyuPlayUrlPrefetchTimer = Timer(douyuPlayUrlPrefetchDelay, () async {
+      if (prefetchGeneration != _douyuPlayUrlPrefetchGeneration ||
+          !_isCurrentPlaybackGeneration(playbackGeneration)) {
+        return;
+      }
+      try {
+        var playUrl = await douyuSite.getPlayUrls(
+          detail: roomDetail,
+          quality: quality,
+        );
+        if (prefetchGeneration != _douyuPlayUrlPrefetchGeneration ||
+            !_isCurrentPlaybackGeneration(playbackGeneration) ||
+            playUrl.urls.isEmpty) {
+          return;
+        }
+        _prefetchedDouyuPlayUrl = playUrl;
+        _prefetchedDouyuPlayUrlAt = DateTime.now();
+        DiagnosticService.instance.recordRecovery('播放地址预取完成');
+      } catch (e) {
+        Log.d('播放地址预取失败: $e');
+      }
+    });
   }
 
   Future<void> changePlayLine(int index) async {
@@ -536,20 +613,63 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return Media(finalUrl, httpHeaders: playHeaders);
     }).toList();
 
+    var preserveCurrentFrame = site.id == Constant.kDouyu &&
+        _recoveryStopwatch != null &&
+        hasLoadedPlayerPlaylist;
+    await loadPlayerPlaylist(
+      mediaList,
+      preserveCurrentFrame: preserveCurrentFrame,
+    );
+  }
+
+  @protected
+  bool get hasLoadedPlayerPlaylist => player.state.playlist.medias.isNotEmpty;
+
+  @protected
+  Future<void> loadPlayerPlaylist(
+    List<Media> mediaList, {
+    required bool preserveCurrentFrame,
+  }) async {
+    var generation = _playbackGeneration;
+    // 斗鱼恢复时保留当前 mpv 媒体，不调用 open() 内部的 stop/clear。
+    // 新地址作为后续条目追加并推进，视频轨恢复后再删除失效条目。
+    if (preserveCurrentFrame) {
+      var oldLength = player.state.playlist.medias.length;
+      _stalePlaylistEntries = oldLength;
+      markRecoveryPlayerCommand('提交播放器无停机切换命令');
+      await player.add(mediaList[currentLineIndex]);
+      if (!_isCurrentPlaybackGeneration(generation)) {
+        return;
+      }
+      // EOF 后追加条目时 mpv 通常会自动前进；next() 会在已经位于末项时
+      // 直接返回，避免 jump() 对同一个不可 seek 的直播流再次定位。
+      await player.next();
+      _recordRecoveryTiming('播放器切换命令完成');
+      return;
+    }
+
     // 初始化播放器并设置 ao 参数
     await initializePlayer();
     if (!_isCurrentPlaybackGeneration(generation)) {
       return;
     }
-
-    await player.open(Playlist(mediaList));
+    _stalePlaylistEntries = 0;
+    markRecoveryPlayerCommand('提交播放器打开命令');
+    await player.open(mediaList[currentLineIndex]);
+    _recordRecoveryTiming('播放器打开命令完成');
   }
 
   Future<void> setPlayer() async {
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     errorMsg.value = "";
 
-    await player.jump(currentLineIndex);
+    var url = playUrls[currentLineIndex];
+    if (AppSettingsController.instance.playerForceHttps.value) {
+      url = url.replaceAll("http://", "https://");
+    }
+    _stalePlaylistEntries = 0;
+    await initializePlayer();
+    await player.open(Media(url, httpHeaders: playHeaders));
   }
 
   @override
@@ -583,6 +703,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   Timer? _stablePlaybackTimer;
   int _freshUrlAttempts = 0;
   static const int _maxFreshUrlAttempts = 3;
+  Stopwatch? _recoveryStopwatch;
+  bool _sawRecoveryBuffering = false;
+  bool _waitingForRecoveryVideo = false;
 
   /// 上一次处理断流事件的时间，用于折叠同一波断流。
   DateTime? _lastRecoveryEventAt;
@@ -641,6 +764,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _lastRecoveryEventAt = now;
 
     var generation = _playbackGeneration;
+    _recoveryStopwatch = Stopwatch()..start();
+    _sawRecoveryBuffering = false;
+    _recordRecoveryTiming('检测到断流');
     _recoveringPlayback = true;
     try {
       // 第一级：原地重载当前线路一次。直播流无法断点续传，重连只能拿到
@@ -652,6 +778,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         mediaErrorRetryCount += 1;
         Log.d("播放中断，重载当前线路");
         DiagnosticService.instance.recordRecovery('重载当前线路');
+        markRecoveryPlayerCommand('提交当前线路重载命令');
         await setPlayer();
         return;
       }
@@ -720,8 +847,25 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _awaitingStablePlayback = true;
   }
 
+  void _recordRecoveryTiming(String stage) {
+    var stopwatch = _recoveryStopwatch;
+    if (stopwatch == null) {
+      return;
+    }
+    DiagnosticService.instance.recordRecoveryTiming(stage, stopwatch.elapsed);
+  }
+
+  @protected
+  void markRecoveryPlayerCommand(String stage) {
+    _waitingForRecoveryVideo = true;
+    _recordRecoveryTiming(stage);
+  }
+
   void _resetRecoveryState() {
     _stablePlaybackTimer?.cancel();
+    _recoveryStopwatch = null;
+    _sawRecoveryBuffering = false;
+    _waitingForRecoveryVideo = false;
     _reportedPlaying = false;
     mediaErrorRetryCount = 0;
     _freshUrlAttempts = 0;
@@ -744,6 +888,56 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         _resetRecoveryState();
       }
     });
+  }
+
+  @override
+  void onBufferingChanged(bool buffering) {
+    if (_recoveryStopwatch == null) {
+      return;
+    }
+    if (buffering) {
+      if (!_sawRecoveryBuffering) {
+        _sawRecoveryBuffering = true;
+        _recordRecoveryTiming('播放器进入缓冲');
+      }
+      return;
+    }
+    if (_sawRecoveryBuffering) {
+      _recordRecoveryTiming('播放器退出缓冲');
+      _sawRecoveryBuffering = false;
+      if (_waitingForRecoveryVideo) {
+        _finishRecoveryTiming('恢复出画（缓冲结束）');
+      }
+    }
+  }
+
+  @override
+  void onVideoDimensionsChanged(int? width, int? height) {
+    if (_recoveryStopwatch != null &&
+        _waitingForRecoveryVideo &&
+        width != null &&
+        height != null) {
+      _finishRecoveryTiming('视频轨恢复（近似首帧）');
+    }
+  }
+
+  void _finishRecoveryTiming(String stage) {
+    _recordRecoveryTiming(stage);
+    _recoveryStopwatch = null;
+    _sawRecoveryBuffering = false;
+    _waitingForRecoveryVideo = false;
+    unawaited(_removeStalePlaylistEntries());
+  }
+
+  Future<void> _removeStalePlaylistEntries() async {
+    var count = _stalePlaylistEntries;
+    if (count == 0) {
+      return;
+    }
+    _stalePlaylistEntries = 0;
+    for (var i = 0; i < count; i++) {
+      await player.remove(0);
+    }
   }
 
   /// 读取SC
@@ -1375,6 +1569,8 @@ ${error?.toString()}
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();
     _stablePlaybackTimer?.cancel();
+    _douyuPlayUrlPrefetchTimer?.cancel();
+    _douyuPlayUrlPrefetchGeneration++;
     _replaySuspended = true;
 
     liveDanmaku.stop();

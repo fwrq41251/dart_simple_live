@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
@@ -61,6 +62,19 @@ class FakeSite extends LiveSite {
   }
 }
 
+class _PrefetchDouyuSite extends DouyuSite {
+  int fetchCount = 0;
+
+  @override
+  Future<LivePlayUrl> getPlayUrls({
+    required LiveRoomDetail detail,
+    required LivePlayQuality quality,
+  }) async {
+    fetchCount++;
+    return LivePlayUrl(urls: ['http://a/$fetchCount.flv']);
+  }
+}
+
 /// 跳过真实播放器与页面副作用
 class TestController extends LiveRoomController {
   TestController({required super.pSite, required super.pRoomId});
@@ -69,6 +83,7 @@ class TestController extends LiveRoomController {
   int replayStops = 0;
   int playerJumps = 0;
   Completer<void>? pendingJump;
+  bool? preservesCurrentFrame;
 
   @override
   Duration get stablePlaybackDuration => const Duration(milliseconds: 20);
@@ -86,7 +101,15 @@ class TestController extends LiveRoomController {
   Duration get recoveryBurstWindow => Duration.zero;
 
   @override
-  Future<void> initPlaylist() async {
+  bool get hasLoadedPlayerPlaylist => true;
+
+  @override
+  Future<void> loadPlayerPlaylist(
+    List<Media> mediaList, {
+    required bool preserveCurrentFrame,
+  }) async {
+    markRecoveryPlayerCommand('提交播放器打开命令');
+    preservesCurrentFrame = preserveCurrentFrame;
     playlistOpens++;
   }
 
@@ -111,6 +134,15 @@ class TestController extends LiveRoomController {
 
   @override
   void addSysMsg(String msg) {}
+}
+
+class _PrefetchController extends TestController {
+  _PrefetchController({required super.pSite, required super.pRoomId});
+
+  Duration prefetchDelay = const Duration(milliseconds: 5);
+
+  @override
+  Duration get douyuPlayUrlPrefetchDelay => prefetchDelay;
 }
 
 class _LoadingController extends TestController {
@@ -450,6 +482,48 @@ void main() {
     expect(fake.detailFetchCount, 0, reason: '签名应由 core 本地刷新，无需重复请求房间详情');
     expect(fake.fetchCount, 1);
     expect(c.playlistOpens, 1);
+    expect(c.preservesCurrentFrame, isTrue,
+        reason: '斗鱼断流恢复应避免完整 stop/clear/open');
+  });
+
+  test('斗鱼在断流前预取播放地址，恢复时不再等待接口', () async {
+    var fake = _PrefetchDouyuSite();
+    var c = _PrefetchController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
+
+    await c.getPlayUrl();
+    expect(fake.fetchCount, 1);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(fake.fetchCount, 2, reason: '播放稳定期间应提前准备下一批地址');
+
+    c.prefetchDelay = const Duration(hours: 1);
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(fake.fetchCount, 2, reason: '断流恢复应直接消费预取结果，不重复等待接口');
+    expect(c.playUrls, ['http://a/2.flv']);
+    expect(c.preservesCurrentFrame, isTrue);
+  });
+
+  test('断流恢复记录取址与近似首帧分段时间', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    c.onBufferingChanged(true);
+    c.onBufferingChanged(false);
+    c.onVideoDimensionsChanged(1920, 1080);
+
+    var events = DiagnosticService.instance.events.join('\n');
+    expect(events, contains('恢复计时: 检测到断流'));
+    expect(events, contains('恢复计时: 新地址就绪'));
+    expect(events, contains('恢复计时: 播放器进入缓冲'));
+    expect(events, contains('恢复计时: 播放器退出缓冲'));
+    expect(events, contains('恢复计时: 恢复出画（缓冲结束）'));
   });
 }
 

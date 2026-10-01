@@ -744,6 +744,7 @@ class PlayerController extends BaseController
   StreamSubscription? _heightSubscription;
   StreamSubscription? _logSubscription;
   StreamSubscription? _playingSubscription;
+  StreamSubscription<bool>? _bufferingSubscription;
 
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
@@ -765,6 +766,10 @@ class PlayerController extends BaseController
       onPlayingChanged(event);
     });
 
+    _bufferingSubscription = player.stream.buffering.listen(
+      onBufferingChanged,
+    );
+
     _completedSubscription = player.stream.completed.listen((event) {
       if (event) {
         mediaEnd();
@@ -778,12 +783,14 @@ class PlayerController extends BaseController
           'width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       isVertical.value =
           (player.state.height ?? 9) > (player.state.width ?? 16);
+      onVideoDimensionsChanged(player.state.width, player.state.height);
     });
     _heightSubscription = player.stream.height.listen((event) {
       Log.d(
           'height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       isVertical.value =
           (player.state.height ?? 9) > (player.state.width ?? 16);
+      onVideoDimensionsChanged(player.state.width, player.state.height);
     });
   }
 
@@ -795,6 +802,7 @@ class PlayerController extends BaseController
     _logSubscription?.cancel();
     _pipSubscription?.cancel();
     _playingSubscription?.cancel();
+    _bufferingSubscription?.cancel();
   }
 
   void mediaEnd() {
@@ -807,6 +815,12 @@ class PlayerController extends BaseController
 
   /// 播放状态变化。子类可覆盖以在恢复播放时重置重试计数等状态。
   void onPlayingChanged(bool playing) {}
+
+  /// 缓冲状态变化。子类可覆盖以观测新流何时开始输出。
+  void onBufferingChanged(bool buffering) {}
+
+  /// 视频尺寸变化。子类可覆盖以观测新流何时完成视频轨初始化。
+  void onVideoDimensionsChanged(int? width, int? height) {}
 
   void showDebugInfo() {
     Utils.showBottomSheet(
