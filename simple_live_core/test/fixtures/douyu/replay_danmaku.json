@@ -1,0 +1,15 @@
+{
+  "error": 0,
+  "msg": "ok",
+  "data": {
+    "count": 3,
+    "start_time": 1300,
+    "end_time": 60000,
+    "forbidden_type": 0,
+    "list": [
+      {"ctt": "later", "tl": 2200, "col": 7},
+      {"ctt": "first", "tl": 1300, "col": 0},
+      {"ctt": "colored", "tl": 1800, "col": 13}
+    ]
+  }
+}

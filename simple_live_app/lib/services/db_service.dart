@@ -8,15 +8,19 @@ import 'package:collection/collection.dart';
 
 class DBService extends GetxService {
   static DBService get instance => Get.find<DBService>();
+  static const int maxReplayProgressCount = 200;
+
   late Box<History> historyBox;
   late Box<FollowUser> followBox;
   late Box<FollowUserTag> tagBox;
+  late Box replayProgressBox;
   final Uuid uuid = const Uuid();
 
   Future init() async {
     historyBox = await Hive.openBox("History");
     followBox = await Hive.openBox("FollowUser");
     tagBox = await Hive.openBox("FollowUserTag");
+    replayProgressBox = await Hive.openBox("ReplayProgress");
   }
 
   // follow_user_tag 相关逻辑
@@ -100,5 +104,43 @@ class DBService extends GetxService {
     var his = historyBox.values.toList();
     his.sort((a, b) => b.updateTime.compareTo(a.updateTime));
     return his;
+  }
+
+  int? getReplayProgress(String id) {
+    var value = replayProgressBox.get(id);
+    if (value is! Map) {
+      return null;
+    }
+    var position = value["position"];
+    return position is int ? position : null;
+  }
+
+  Future<void> saveReplayProgress(String id, int position) async {
+    await replayProgressBox.put(id, {
+      "position": position,
+      "updateTime": DateTime.now().millisecondsSinceEpoch,
+    });
+    if (replayProgressBox.length <= maxReplayProgressCount) {
+      return;
+    }
+
+    var entries = replayProgressBox.toMap().entries.toList()
+      ..sort((a, b) {
+        var aTime = a.value is Map && a.value["updateTime"] is int
+            ? a.value["updateTime"] as int
+            : 0;
+        var bTime = b.value is Map && b.value["updateTime"] is int
+            ? b.value["updateTime"] as int
+            : 0;
+        return aTime.compareTo(bTime);
+      });
+    var expiredKeys = entries
+        .take(replayProgressBox.length - maxReplayProgressCount)
+        .map((e) => e.key);
+    await replayProgressBox.deleteAll(expiredKeys);
+  }
+
+  Future<void> removeReplayProgress(String id) async {
+    await replayProgressBox.delete(id);
   }
 }

@@ -31,13 +31,13 @@ class LiveReplaySession {
 
   @override
   String toString() => json.encode({
-        "showId": showId,
-        "title": title,
-        "time": time,
-        "dateFormat": dateFormat,
-        "timeFormat": timeFormat,
-        "items": items.map((e) => e.toString()).toList(),
-      });
+    "showId": showId,
+    "title": title,
+    "time": time,
+    "dateFormat": dateFormat,
+    "timeFormat": timeFormat,
+    "items": items.map((e) => e.toString()).toList(),
+  });
 }
 
 /// 回放分段（单个可播放的录像）
@@ -79,15 +79,15 @@ class LiveReplayItem {
 
   @override
   String toString() => json.encode({
-        "hashId": hashId,
-        "title": title,
-        "cover": cover,
-        "duration": duration,
-        "strDuration": strDuration,
-        "startTime": startTime,
-        "viewNum": viewNum,
-        "pointId": pointId,
-      });
+    "hashId": hashId,
+    "title": title,
+    "cover": cover,
+    "duration": duration,
+    "strDuration": strDuration,
+    "startTime": startTime,
+    "viewNum": viewNum,
+    "pointId": pointId,
+  });
 }
 
 /// 回放列表结果
@@ -98,10 +98,7 @@ class LiveReplayListResult {
   /// 场次列表
   final List<LiveReplaySession> items;
 
-  LiveReplayListResult({
-    required this.count,
-    required this.items,
-  });
+  LiveReplayListResult({required this.count, required this.items});
 }
 
 /// 回放的单个清晰度及其播放地址
@@ -122,11 +119,8 @@ class LiveReplayQuality {
   });
 
   @override
-  String toString() => json.encode({
-        "quality": quality,
-        "name": name,
-        "url": url,
-      });
+  String toString() =>
+      json.encode({"quality": quality, "name": name, "url": url});
 }
 
 /// 回放的播放地址集合（含请求头）
@@ -137,8 +131,38 @@ class LiveReplayUrl {
   /// 请求头
   final Map<String, String>? headers;
 
-  LiveReplayUrl({
-    required this.qualities,
-    this.headers,
+  LiveReplayUrl({required this.qualities, this.headers});
+}
+
+/// 一条与回放时间轴绑定的弹幕。
+class LiveReplayDanmaku {
+  /// 相对当前回放分段起点的时间（毫秒）。
+  final int time;
+
+  final String text;
+
+  /// ARGB 颜色值。
+  final int color;
+
+  LiveReplayDanmaku({
+    required this.time,
+    required this.text,
+    required this.color,
+  });
+}
+
+/// 回放弹幕的一个按需加载区间。
+class LiveReplayDanmakuResult {
+  final int startTime;
+
+  /// 本次响应覆盖到的时间（毫秒）；-1 表示已覆盖到回放结束。
+  final int endTime;
+
+  final List<LiveReplayDanmaku> items;
+
+  LiveReplayDanmakuResult({
+    required this.startTime,
+    required this.endTime,
+    required this.items,
   });
 }

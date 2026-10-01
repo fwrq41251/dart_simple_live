@@ -20,7 +20,7 @@ import 'package:simple_live_core/src/model/live_replay.dart';
 import 'package:html_unescape/html_unescape.dart';
 import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 
-class DouyuSite implements LiveSite {
+class DouyuSite implements LiveSite, LiveReplayDanmakuSite {
   @override
   String id = "douyu";
 
@@ -412,11 +412,7 @@ class DouyuSite implements LiveSite {
     var did = generateRandomString(32);
     var result = await HttpClient.instance.getJson(
       "https://www.douyu.com/japi/search/api/searchUser",
-      queryParameters: {
-        "kw": roomId,
-        "page": 1,
-        "pageSize": 10,
-      },
+      queryParameters: {"kw": roomId, "page": 1, "pageSize": 10},
       header: {
         'User-Agent': _kReplayUserAgent,
         'referer': 'https://www.douyu.com/search/',
@@ -456,11 +452,7 @@ class DouyuSite implements LiveSite {
 
     var result = await HttpClient.instance.getJson(
       "https://v.douyu.com/wgapi/vod/center/authorShowVideoList",
-      queryParameters: {
-        "up_id": upId,
-        "page": page,
-        "limit": 20,
-      },
+      queryParameters: {"up_id": upId, "page": page, "limit": 20},
       header: {
         'user-agent': _kReplayUserAgent,
         'referer': 'https://v.douyu.com/',
@@ -476,25 +468,29 @@ class DouyuSite implements LiveSite {
     for (var session in (data["list"] ?? [])) {
       var videos = <LiveReplayItem>[];
       for (var v in (session["video_list"] ?? [])) {
-        videos.add(LiveReplayItem(
-          hashId: v["hash_id"]?.toString() ?? "",
-          title: v["title"]?.toString() ?? "",
-          cover: v["video_pic"]?.toString() ?? "",
-          duration: int.tryParse(v["video_duration"]?.toString() ?? "") ?? 0,
-          strDuration: v["video_str_duration"]?.toString() ?? "",
-          startTime: int.tryParse(v["start_time"]?.toString() ?? "") ?? 0,
-          viewNum: int.tryParse(v["view_num"]?.toString() ?? "") ?? 0,
-          pointId: int.tryParse(v["point_id"]?.toString() ?? "") ?? 0,
-        ));
+        videos.add(
+          LiveReplayItem(
+            hashId: v["hash_id"]?.toString() ?? "",
+            title: v["title"]?.toString() ?? "",
+            cover: v["video_pic"]?.toString() ?? "",
+            duration: int.tryParse(v["video_duration"]?.toString() ?? "") ?? 0,
+            strDuration: v["video_str_duration"]?.toString() ?? "",
+            startTime: int.tryParse(v["start_time"]?.toString() ?? "") ?? 0,
+            viewNum: int.tryParse(v["view_num"]?.toString() ?? "") ?? 0,
+            pointId: int.tryParse(v["point_id"]?.toString() ?? "") ?? 0,
+          ),
+        );
       }
-      items.add(LiveReplaySession(
-        showId: int.tryParse(session["show_id"]?.toString() ?? "") ?? 0,
-        title: session["title"]?.toString() ?? "",
-        time: session["time"]?.toString() ?? "",
-        dateFormat: session["date_format"]?.toString() ?? "",
-        timeFormat: session["time_format"]?.toString() ?? "",
-        items: videos,
-      ));
+      items.add(
+        LiveReplaySession(
+          showId: int.tryParse(session["show_id"]?.toString() ?? "") ?? 0,
+          title: session["title"]?.toString() ?? "",
+          time: session["time"]?.toString() ?? "",
+          dateFormat: session["date_format"]?.toString() ?? "",
+          timeFormat: session["time_format"]?.toString() ?? "",
+          items: videos,
+        ),
+      );
     }
 
     return LiveReplayListResult(
@@ -558,32 +554,93 @@ class DouyuSite implements LiveSite {
         if (url.isEmpty) {
           continue;
         }
-        qualities.add(LiveReplayQuality(
-          quality: key.toString(),
-          name: item["name"]?.toString() ?? key.toString(),
-          url: url,
-        ));
+        qualities.add(
+          LiveReplayQuality(
+            quality: key.toString(),
+            name: item["name"]?.toString() ?? key.toString(),
+            url: url,
+          ),
+        );
         levels.add(int.tryParse(item["level"]?.toString() ?? "") ?? 0);
       }
     }
 
     var order = List<int>.generate(qualities.length, (i) => i)
       ..sort((a, b) => levels[b].compareTo(levels[a]));
-    return LiveReplayUrl(
-      qualities: order.map((i) => qualities[i]).toList(),
+    return LiveReplayUrl(qualities: order.map((i) => qualities[i]).toList());
+  }
+
+  @override
+  Future<LiveReplayDanmakuResult> getReplayDanmaku({
+    required String hashId,
+    required int startTime,
+  }) async {
+    var result = await HttpClient.instance.getJson(
+      "https://v.douyu.com/wgapi/vod/center/getBarrageList",
+      queryParameters: {"vid": hashId, "start_time": startTime, "end_time": -1},
+      header: {
+        'user-agent': _kReplayUserAgent,
+        'referer': 'https://v.douyu.com/show/$hashId',
+      },
+    );
+
+    if (result["error"] != 0) {
+      throw Exception(result["msg"]);
+    }
+
+    var data = result["data"] ?? {};
+    var items = <LiveReplayDanmaku>[];
+    for (var item in (data["list"] ?? [])) {
+      var text = item["ctt"]?.toString() ?? "";
+      if (text.isEmpty) {
+        continue;
+      }
+      items.add(
+        LiveReplayDanmaku(
+          time: int.tryParse(item["tl"]?.toString() ?? "") ?? 0,
+          text: text,
+          color: _replayDanmakuColor(
+            int.tryParse(item["col"]?.toString() ?? "") ?? 0,
+          ),
+        ),
+      );
+    }
+    items.sort((a, b) => a.time.compareTo(b.time));
+
+    return LiveReplayDanmakuResult(
+      // data.start_time 是第一条弹幕时间，并非接口实际覆盖区间的起点。
+      // 使用请求值，避免前面没有弹幕的空白区间被反复请求。
+      startTime: startTime,
+      endTime: int.tryParse(data["end_time"]?.toString() ?? "") ?? -1,
+      items: items,
     );
   }
+
+  int _replayDanmakuColor(int color) => switch (color) {
+    7 => 0xFFFF5654,
+    8 => 0xFFFF7523,
+    9 => 0xFFFE69B3,
+    10 => 0xFFFFBC00,
+    11 => 0xFF78C946,
+    12 => 0xFF9E7FFF,
+    13 => 0xFF3D9BFF,
+    _ => 0xFFFFFFFF,
+  };
 
   /// 从回放页提取 window.$DATA 中的 ROOM 节点。
   ///
   /// $DATA 是 JS 对象字面量（键无引号），需要先转成合法 JSON。
   Map? _parseReplayPageData(String html) {
-    var match = RegExp(r'window\.\$DATA\s*=\s*(\{.*?\});', dotAll: true)
-        .firstMatch(html);
+    var match = RegExp(
+      r'window\.\$DATA\s*=\s*(\{.*?\});',
+      dotAll: true,
+    ).firstMatch(html);
     if (match == null) {
       return null;
     }
-    var jsonText = match.group(1)!.replaceAllMapped(
+    var jsonText = match
+        .group(1)!
+        .replaceAllMapped(
           RegExp(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:'),
           (m) => '${m[1]}"${m[2]}":',
         );
@@ -601,8 +658,10 @@ class DouyuSite implements LiveSite {
 
   /// 提取含 ub98484234 签名函数的 <script> 内容
   String? _extractSignScript(String html) {
-    for (var m
-        in RegExp(r'<script[^>]*>(.*?)</script>', dotAll: true).allMatches(html)) {
+    for (var m in RegExp(
+      r'<script[^>]*>(.*?)</script>',
+      dotAll: true,
+    ).allMatches(html)) {
       var content = m.group(1) ?? "";
       if (content.contains("ub98484234")) {
         return content;

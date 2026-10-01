@@ -19,6 +19,7 @@ class MockHttpClient implements HttpClient {
 
   /// 记录收到的请求，便于断言
   final List<String> requests = [];
+  final List<Map<String, dynamic>> queries = [];
 
   MockHttpClient(this.routes);
 
@@ -53,6 +54,7 @@ class MockHttpClient implements HttpClient {
     Map<String, dynamic>? header,
     CancelToken? cancel,
   }) async {
+    queries.add(queryParameters ?? {});
     return jsonDecode(_resolve(url));
   }
 

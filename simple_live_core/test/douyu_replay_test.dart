@@ -18,6 +18,7 @@ void main() {
       'authorShowVideoList': fixture('replay_list.json'),
       'v.douyu.com/show': fixture('replay_show.html'),
       'getStreamUrlWeb': fixture('stream_url.json'),
+      'getBarrageList': fixture('replay_danmaku.json'),
     });
     HttpClient.instance = mock;
   });
@@ -93,6 +94,25 @@ void main() {
       expect(result.qualities, isNotEmpty);
     });
 
+    test('解析回放弹幕并按时间排序', () async {
+      final result = await site.getReplayDanmaku(
+        hashId: 'EO0XvNxPllxMDrBd',
+        startTime: 1000,
+      );
+
+      expect(result.startTime, 1000);
+      expect(result.endTime, 60000);
+      expect(result.items.map((e) => e.text), ['first', 'colored', 'later']);
+      expect(result.items.map((e) => e.time), [1300, 1800, 2200]);
+      expect(result.items[0].color, 0xFFFFFFFF);
+      expect(result.items[1].color, 0xFF3D9BFF);
+      expect(mock.queries.last, {
+        'vid': 'EO0XvNxPllxMDrBd',
+        'start_time': 1000,
+        'end_time': -1,
+      });
+    });
+
     test('清晰度按 level 降序排列，索引 0 为最高清晰度', () async {
       // 接口返回的 thumb_video 是 JSON 对象，键顺序由服务端决定：
       // 实测 231059 房间返回 normal 在前、super 在后。
@@ -110,10 +130,11 @@ void main() {
       );
 
       // 响应里 normal(5) 在前、super(15) 在后，必须被重排
-      expect(
-        result.qualities.map((e) => e.quality).toList(),
-        ['super', 'high', 'normal'],
-      );
+      expect(result.qualities.map((e) => e.quality).toList(), [
+        'super',
+        'high',
+        'normal',
+      ]);
       expect(result.qualities.first.name, '高清1080P');
     });
 
@@ -130,10 +151,11 @@ void main() {
         hashId: 'EO0XvNxPllxMDrBd',
       );
 
-      expect(
-        result.qualities.map((e) => e.quality).toList(),
-        ['normal', 'high', 'super'],
-      );
+      expect(result.qualities.map((e) => e.quality).toList(), [
+        'normal',
+        'high',
+        'super',
+      ]);
     });
 
     test('页面缺少 \$DATA 时抛出明确异常', () async {

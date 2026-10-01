@@ -1,8 +1,10 @@
+import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/replay/replay_controller.dart';
 
@@ -161,33 +163,61 @@ class ReplayPage extends GetView<ReplayController> {
         behavior: HitTestBehavior.opaque,
         onTap: controller.showControlsTemporarily,
         child: Container(
-          color: Colors.black26,
-          child: Column(
+          color: Colors.transparent,
+          child: Stack(
             children: [
-              if (controller.showControls.value && controller.fullScreen.value)
-                Row(
-                  children: [
-                    IconButton(
-                      tooltip: "退出全屏",
-                      onPressed: controller.toggleFullScreen,
-                      icon: const Icon(
-                        Icons.arrow_back,
-                        color: Colors.white,
-                      ),
+              if (controller.supportsReplayDanmaku) _buildDanmakuView(),
+              Column(
+                children: [
+                  if (controller.showControls.value &&
+                      controller.fullScreen.value)
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: "退出全屏",
+                          onPressed: controller.toggleFullScreen,
+                          icon: const Icon(
+                            Icons.arrow_back,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            controller.pItem.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: Text(
-                        controller.pItem.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              const Expanded(child: SizedBox()),
-              if (controller.showControls.value) _buildBottomBar(),
+                  const Expanded(child: SizedBox()),
+                  if (controller.showControls.value) _buildBottomBar(),
+                ],
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDanmakuView() {
+    controller.danmakuView ??= DanmakuScreen(
+      key: controller.globalDanmakuKey,
+      createdController: controller.initDanmakuController,
+      option: controller.danmakuOption,
+    );
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Offstage(
+          offstage: !controller.showDanmaku.value,
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: AppSettingsController.instance.danmuTopMargin.value,
+              bottom: AppSettingsController.instance.danmuBottomMargin.value,
+            ),
+            child: controller.danmakuView!,
           ),
         ),
       ),
@@ -262,6 +292,20 @@ class ReplayPage extends GetView<ReplayController> {
               ),
               _buildSpeedButton(),
               _buildQualityButton(),
+              if (controller.supportsReplayDanmaku)
+                IconButton(
+                  onPressed: controller.toggleDanmaku,
+                  tooltip: controller.showDanmaku.value ? "关闭弹幕" : "打开弹幕",
+                  icon: ImageIcon(
+                    AssetImage(
+                      controller.showDanmaku.value
+                          ? 'assets/icons/icon_danmaku_close.png'
+                          : 'assets/icons/icon_danmaku_open.png',
+                    ),
+                    size: 24,
+                    color: Colors.white,
+                  ),
+                ),
               Obx(
                 () => IconButton(
                   tooltip: controller.fullScreen.value ? "退出全屏" : "进入全屏",
