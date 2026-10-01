@@ -508,6 +508,23 @@ void main() {
     expect(c.preservesCurrentFrame, isTrue);
   });
 
+  test('每次恢复出画后重新计算地址重试次数', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    // 连续四次独立断流都成功出画。若成功后没有重置 _freshUrlAttempts，
+    // 第四次会因达到 3 次上限而停止，且第二、三次会套用旧失败的退避。
+    for (var i = 1; i <= 4; i++) {
+      c.mediaEnd();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(fake.fetchCount, i, reason: '第 $i 次独立断流仍应自动获取新地址');
+      c.onBufferingChanged(true);
+      c.onBufferingChanged(false);
+    }
+
+    expect(c.playlistOpens, 4);
+  });
+
   test('断流恢复记录取址与近似首帧分段时间', () async {
     var fake = FakeSite(urlsAvailable: true);
     var c = build(fake);

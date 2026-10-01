@@ -844,7 +844,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
 
     // playing=true 可能只是 open/jump 的瞬时事件；稳定计时结束前不清空重试状态。
-    _awaitingStablePlayback = true;
+    // 若播放器已经退出恢复缓冲，_finishRecoveryTiming 已确认新流出画并重置状态，
+    // 不要在异步取址返回后重新标记为等待稳定。
+    if (_recoveryStopwatch != null) {
+      _awaitingStablePlayback = true;
+    }
   }
 
   void _recordRecoveryTiming(String stage) {
@@ -867,11 +871,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _sawRecoveryBuffering = false;
     _waitingForRecoveryVideo = false;
     _reportedPlaying = false;
+    _resetRecoveryAttempts();
+    _lastRecoveryEventAt = null;
+  }
+
+  void _resetRecoveryAttempts() {
     mediaErrorRetryCount = 0;
     _freshUrlAttempts = 0;
     _awaitingStablePlayback = false;
     _automaticRecoveryExhausted = false;
-    _lastRecoveryEventAt = null;
   }
 
   @override
@@ -923,6 +931,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   void _finishRecoveryTiming(String stage) {
     _recordRecoveryTiming(stage);
+    // append/next 会让播放器始终保持 playing=true，因此不一定产生足以启动
+    // 稳定播放计时器的状态变化。退出恢复缓冲（或视频轨重新出现）已经证明
+    // 新流开始出画，应在此清空连续失败计数，避免下次断流误用 1s/2s 退避，
+    // 甚至在第四次断流时停止自动恢复。保留合并窗口以继续过滤迟到事件。
+    _resetRecoveryAttempts();
     _recoveryStopwatch = null;
     _sawRecoveryBuffering = false;
     _waitingForRecoveryVideo = false;
