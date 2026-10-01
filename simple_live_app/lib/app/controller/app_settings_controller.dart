@@ -108,7 +108,7 @@ class AppSettingsController extends GetxController {
         .getValue(LocalStorageService.kBilibiliLoginTip, true);
 
     playerBufferSize.value = LocalStorageService.instance
-        .getValue(LocalStorageService.kPlayerBufferSize, 32);
+        .getValue(LocalStorageService.kPlayerBufferSize, 64);
 
     logEnable.value = LocalStorageService.instance
         .getValue(LocalStorageService.kLogEnable, false);
@@ -352,7 +352,9 @@ class AppSettingsController extends GetxController {
         .setValue(LocalStorageService.kPlayerCompatMode, e);
   }
 
-  var playerBufferSize = 32.obs;
+  /// 默认 64 MB。媒体缓冲是吸收网络抖动的唯一手段，而 32 MB 在
+  /// 8 Mbps 码率下仅约 32 秒；配合 60 秒网络超时，64 MB 才留出足够余量。
+  var playerBufferSize = 64.obs;
   void setPlayerBufferSize(int e) {
     playerBufferSize.value = e;
     LocalStorageService.instance

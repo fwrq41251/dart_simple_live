@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:simple_live_core/src/common/core_log.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/danmaku/douyu_danmaku.dart';
 import 'package:simple_live_core/src/interface/live_danmaku.dart';
@@ -139,13 +140,19 @@ class DouyuSite implements LiveSite {
     var args = detail.data.toString();
     var data = quality.data as DouyuPlayData;
 
-    List<String> urls = [];
-    for (var item in data.cdns) {
-      var url = await getPlayUrl(detail.roomId, args, data.rate, item);
-      if (url.isNotEmpty) {
-        urls.add(url);
-      }
-    }
+    var urls = await Future.wait(
+      data.cdns.map((item) async {
+        try {
+          return await getPlayUrl(detail.roomId, args, data.rate, item);
+        } catch (e) {
+          // 各 CDN 地址彼此独立。单个节点返回异常结构时保留其他成功地址，
+          // 避免一次坏响应使整个直播恢复流程失败。
+          CoreLog.error(e);
+          return "";
+        }
+      }),
+    );
+    urls.removeWhere((url) => url.isEmpty);
     return LivePlayUrl(urls: urls);
   }
 
@@ -250,7 +257,9 @@ class DouyuSite implements LiveSite {
       notice: "",
       status: roomInfo["show_status"] == 1 && roomInfo["videoLoop"] != 1,
       danmakuData: roomInfo["room_id"].toString(),
-      data: DouyuSign.getSign(crptext, roomInfo["room_id"].toString()),
+      // 保存签名脚本而不是一次性签名。getH5Play 的签名带当前时间，
+      // 长时间播放后必须在每次取址时重新生成。
+      data: DouyuSignData(crptext, roomInfo["room_id"].toString()),
       url: "https://www.douyu.com/$roomId",
       isRecord: roomInfo["videoLoop"] == 1,
       showTime: showTime,
@@ -607,4 +616,14 @@ class DouyuPlayData {
   final int rate;
   final List<String> cdns;
   DouyuPlayData(this.rate, this.cdns);
+}
+
+class DouyuSignData {
+  DouyuSignData(this.script, this.roomId);
+
+  final String script;
+  final String roomId;
+
+  @override
+  String toString() => DouyuSign.getSign(script, roomId);
 }

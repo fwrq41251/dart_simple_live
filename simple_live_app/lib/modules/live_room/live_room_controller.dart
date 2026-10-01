@@ -508,7 +508,14 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaEnd() {
     super.mediaEnd();
-    unawaited(_recoverPlayback("播放结束"));
+    // 斗鱼直播响应会在固定体积附近正常 EOF；此时旧签名地址已经失效，
+    // 原地重载只会短暂恢复后再次结束，直接取新地址更快。
+    unawaited(
+      _recoverPlayback(
+        "播放结束",
+        reloadCurrentUrl: site.id != "douyu",
+      ),
+    );
   }
 
   int mediaErrorRetryCount = 0;
@@ -560,7 +567,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     return Duration(milliseconds: capped);
   }
 
-  Future<void> _recoverPlayback(String failMessage) async {
+  Future<void> _recoverPlayback(
+    String failMessage, {
+    bool reloadCurrentUrl = true,
+  }) async {
     _reportedPlaying = false;
     _stablePlaybackTimer?.cancel();
     if (_replaySuspended ||
@@ -587,7 +597,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       // 第一级：原地重载当前线路一次。直播流无法断点续传，重连只能拿到
       // 时间轴不连续的数据（FFmpeg 会报 Packet mismatch、解码器丢参考帧），
       // 所以画面必须重建；这里只是把「重建」限制在一次，避免反复停顿。
-      if (!_awaitingStablePlayback && mediaErrorRetryCount < 1) {
+      if (reloadCurrentUrl &&
+          !_awaitingStablePlayback &&
+          mediaErrorRetryCount < 1) {
         mediaErrorRetryCount += 1;
         Log.d("播放中断，重载当前线路");
         await setPlayer();
@@ -643,8 +655,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       ok = false;
     }
     if (!ok) {
-      _resetRecoveryState();
-      liveStatus.value = false;
+      // 取址失败可能只是平台接口或某个 CDN 的瞬时异常，不能据此判定
+      // 主播下播；旧流甚至可能已经恢复。继续有限重试，耗尽后保留直播
+      // 状态并交给用户手动刷新。只有房间详情明确报告下播才显示「未开播」。
+      await retryWithFreshUrls(failMessage, generation);
       return;
     }
 

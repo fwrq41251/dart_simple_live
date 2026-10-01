@@ -26,6 +26,17 @@ mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
 
+  /// 网络超时（秒）。
+  ///
+  /// mpv 的默认值是 60 秒，但 media_kit 在初始化时把它覆盖成 5 秒，
+  /// 于是任何超过 5 秒的读取停顿都会被判定为连接失败并中断播放。
+  /// 直播流无法断点续传，中断只能靠重建播放链路恢复，用户看到的就是画面
+  /// 反复停顿。改回 mpv 的默认值后，这类停顿会被平滑吸收。
+  ///
+  /// 与 stream-lavf-o 的 reconnect 不同，本项不涉及断点续传，
+  /// 不会造成时间轴不连续（撕裂）。
+  static const int kNetworkTimeoutSeconds = 60;
+
   /// 播放器实例
   late final player = Player(
     configuration: PlayerConfiguration(
@@ -53,8 +64,15 @@ mixin PlayerMixin {
         );
       }
     }
+    // 恢复 mpv 的 60 秒网络超时（media_kit 默认覆盖为 5 秒）。
+    if (player.platform is NativePlayer) {
+      await pp.setProperty(
+        'network-timeout',
+        kNetworkTimeoutSeconds.toString(),
+      );
+    }
     // media_kit 仓库更新导致的问题，临时解决办法
-    if(Platform.isAndroid){
+    if (Platform.isAndroid) {
       await pp.setProperty('force-seekable', 'yes');
     }
   }

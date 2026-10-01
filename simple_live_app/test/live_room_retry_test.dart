@@ -11,17 +11,35 @@ import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
-/// 假站点：urlsAvailable=false 模拟"重新取地址也拿不到"（房间已下播）
+/// 假站点：urlsAvailable=false 模拟播放地址接口暂时不可用。
 class FakeSite extends LiveSite {
   FakeSite({required this.urlsAvailable});
   final bool urlsAvailable;
   int fetchCount = 0;
+  int detailFetchCount = 0;
   Completer<LivePlayUrl>? pendingPlayUrl;
 
   @override
   String get id => "douyu";
   @override
   String get name => "fake";
+
+  @override
+  Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
+    detailFetchCount++;
+    return LiveRoomDetail(
+      roomId: roomId,
+      title: 't',
+      cover: '',
+      userName: 'u',
+      userAvatar: '',
+      online: 1,
+      status: true,
+      data: 'fresh-signature',
+      url: '',
+      isRecord: false,
+    );
+  }
 
   @override
   Future<List<LivePlayQuality>> getPlayQualites(
@@ -145,15 +163,16 @@ void main() {
     expect(c.liveStatus.value, true, reason: '不应置为未开播');
   });
 
-  test('房间确实下播：重新获取拿不到地址，判定未开播', () async {
+  test('播放地址接口失败：有限重试且不误判未开播', () async {
     var fake = FakeSite(urlsAvailable: false);
     var c = build(fake);
 
     c.mediaEnd();
     await Future.delayed(const Duration(milliseconds: 400));
 
-    expect(fake.fetchCount, 1, reason: '应重新请求一次播放地址');
-    expect(c.liveStatus.value, false, reason: '应判定为未开播');
+    expect(fake.fetchCount, 3, reason: '应在上限内重试播放地址接口');
+    expect(c.liveStatus.value, true, reason: '取址失败不代表主播未开播');
+    expect(c.playlistOpens, 0);
   });
 
   test('mediaError 路径同样生效', () async {
@@ -196,8 +215,8 @@ void main() {
     c.mediaErrorRetryCount = 0;
     c.pendingJump = Completer<void>();
 
-    c.mediaEnd();
     c.mediaError('same failure');
+    c.mediaEnd();
     await Future<void>.delayed(Duration.zero);
 
     expect(c.playerJumps, 1);
@@ -309,7 +328,7 @@ void main() {
     // 模拟播放稳定后再次断流：窗口与计数都已重置，必须重新恢复
     c.onPlayingChanged(true);
     await Future<void>.delayed(c.stablePlaybackDuration * 2);
-    c.mediaEnd();
+    c.mediaError('new stream error');
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     // 重置后重试计数归零，新一轮走"重载当前线路"分支
@@ -343,15 +362,33 @@ void main() {
     c.mediaErrorRetryCount = 0;
 
     // 第一次：原地重载
-    c.mediaEnd();
+    c.mediaError('stream error');
     await Future<void>.delayed(const Duration(milliseconds: 40));
     expect(c.playerJumps, 1);
     expect(fake.fetchCount, 0);
 
     // 第二次：不再换线路，直接重新取址
-    c.mediaEnd();
+    c.mediaError('stream error');
     await Future<void>.delayed(const Duration(milliseconds: 40));
     expect(fake.fetchCount, 1, reason: '第二次失败应直接重新取址');
+  });
+
+  test('斗鱼直播正常结束事件跳过失效旧地址并直接重新取址', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = TestController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
+    c.mediaErrorRetryCount = 0;
+
+    c.mediaEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(c.playerJumps, 0, reason: '斗鱼 EOF 后不应重载带旧签名的地址');
+    expect(fake.detailFetchCount, 0, reason: '签名应由 core 本地刷新，无需重复请求房间详情');
+    expect(fake.fetchCount, 1);
+    expect(c.playlistOpens, 1);
   });
 }
 
@@ -393,7 +430,6 @@ class _BurstController extends TestController {
 
   @override
   Duration get recoveryBurstWindow => const Duration(seconds: 5);
-
 }
 
 /// 测试用 wakelock 实现
