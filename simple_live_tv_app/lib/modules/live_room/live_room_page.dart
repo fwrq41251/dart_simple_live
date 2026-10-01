@@ -40,9 +40,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         onKeyEvent: onKeyEvent,
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: Obx(
-            () => buildMediaPlayer(),
-          ),
+          body: Obx(() => buildMediaPlayer()),
         ),
       ),
     );
@@ -64,6 +62,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     if (key.logicalKey == LogicalKeyboardKey.select ||
         key.logicalKey == LogicalKeyboardKey.enter ||
         key.logicalKey == LogicalKeyboardKey.space) {
+      if (controller.canManuallyRetry) {
+        controller.refreshRoom();
+        return;
+      }
       if (!controller.showControlsState.value) {
         controller.showControls();
       } else {
@@ -145,10 +147,30 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           () => Visibility(
             visible:
                 !controller.liveStatus.value && !controller.pageLoadding.value,
-            child: Center(
-              child: Text(
-                "未开播",
-                style: AppStyle.textStyleWhite,
+            child: Center(child: Text("未开播", style: AppStyle.textStyleWhite)),
+          ),
+        ),
+        Obx(
+          () => Visibility(
+            visible: controller.recoveryStatus.value.isNotEmpty,
+            child: SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  margin: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    controller.recoveryStatus.value,
+                    style: AppStyle.textStyleWhite,
+                  ),
+                ),
               ),
             ),
           ),
