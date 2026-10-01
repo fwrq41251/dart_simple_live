@@ -121,6 +121,7 @@ class ReplayController extends BaseController with WindowListener {
   bool _closing = false;
   bool _exitRequested = false;
   bool _playerDisposed = false;
+  double _lastAudibleVolume = 100;
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -135,6 +136,7 @@ class ReplayController extends BaseController with WindowListener {
     }
     showDanmaku.value = supportsReplayDanmaku &&
         AppSettingsController.instance.danmuEnable.value;
+    player.setVolume(AppSettingsController.instance.playerVolume.value);
     initStream();
     loadData();
   }
@@ -306,6 +308,29 @@ class ReplayController extends BaseController with WindowListener {
     } else {
       await _runPlayerOperation(player.play);
     }
+  }
+
+  Future<double> adjustVolume(double delta) async {
+    var volume = (player.state.volume + delta).clamp(0, 100).toDouble();
+    if (volume > 0) {
+      _lastAudibleVolume = volume;
+    }
+    await _runPlayerOperation(() => player.setVolume(volume));
+    AppSettingsController.instance.setPlayerVolume(volume);
+    return volume;
+  }
+
+  Future<double> toggleMute() async {
+    var volume = player.state.volume;
+    if (volume > 0) {
+      _lastAudibleVolume = volume;
+      volume = 0;
+    } else {
+      volume = _lastAudibleVolume > 0 ? _lastAudibleVolume : 100;
+    }
+    await _runPlayerOperation(() => player.setVolume(volume));
+    AppSettingsController.instance.setPlayerVolume(volume);
+    return volume;
   }
 
   Future<void> setSpeed(double value) async {

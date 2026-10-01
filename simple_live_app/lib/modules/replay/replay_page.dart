@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -7,6 +9,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/replay/replay_controller.dart';
+import 'package:simple_live_app/widgets/desktop_player_shortcuts.dart';
 
 /// 回放播放页
 class ReplayPage extends GetView<ReplayController> {
@@ -25,7 +28,7 @@ class ReplayPage extends GetView<ReplayController> {
 
   @override
   Widget build(BuildContext context) {
-    return Obx(() {
+    var page = Obx(() {
       var fullScreen = controller.fullScreen.value;
       return PopScope(
         canPop: controller.allowPop.value,
@@ -61,6 +64,24 @@ class ReplayPage extends GetView<ReplayController> {
         ),
       );
     });
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return page;
+    }
+    return DesktopPlayerShortcuts(
+      onTogglePlay: controller.togglePlay,
+      onToggleFullScreen: controller.toggleFullScreen,
+      onToggleMute: controller.toggleMute,
+      onVolumeUp: () => controller.adjustVolume(5),
+      onVolumeDown: () => controller.adjustVolume(-5),
+      onSeekBackward: () => controller.seekTo(
+        controller.position.value - const Duration(seconds: 10),
+      ),
+      onSeekForward: () => controller.seekTo(
+        controller.position.value + const Duration(seconds: 10),
+      ),
+      onEscape: () => Navigator.of(context).maybePop(),
+      child: page,
+    );
   }
 
   Widget _buildPageBody(BuildContext context) {
@@ -162,6 +183,7 @@ class ReplayPage extends GetView<ReplayController> {
       () => GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: controller.showControlsTemporarily,
+        onDoubleTap: controller.toggleFullScreen,
         child: Container(
           color: Colors.transparent,
           child: Stack(

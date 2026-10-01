@@ -16,6 +16,7 @@ import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
+import 'package:simple_live_app/widgets/desktop_player_shortcuts.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
 import 'package:simple_live_app/widgets/keep_alive_wrapper.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
@@ -31,7 +32,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   @override
   Widget build(BuildContext context) {
-    final page = Obx(
+    Widget page = Obx(
       () {
         if (controller.loadError.value) {
           return Scaffold(
@@ -90,8 +91,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         if (controller.fullScreenState.value) {
           return PopScope(
             canPop: false,
-            onPopInvokedWithResult: (e, r) {
-              controller.exitFull();
+            onPopInvokedWithResult: (e, r) async {
+              await controller.exitPresentationMode();
             },
             child: Scaffold(
               body: buildMediaPlayer(),
@@ -102,6 +103,21 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         }
       },
     );
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      page = DesktopPlayerShortcuts(
+        onTogglePlay: controller.togglePlay,
+        onToggleFullScreen: controller.toggleFullScreen,
+        onToggleMute: controller.toggleMute,
+        onVolumeUp: () => controller.adjustVolume(5),
+        onVolumeDown: () => controller.adjustVolume(-5),
+        onEscape: () async {
+          if (!await controller.exitPresentationMode()) {
+            Get.back();
+          }
+        },
+        child: page,
+      );
+    }
     if (!Platform.isAndroid) {
       return page;
     }

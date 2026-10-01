@@ -114,6 +114,13 @@ class LocalStorageService extends GetxService {
   /// 小窗隐藏弹幕
   static const String kPIPHideDanmu = "PIPHideDanmu";
 
+  /// 桌面端普通窗口的位置与大小
+  static const String kDesktopWindowBounds = "DesktopWindowBounds";
+
+  /// 桌面端小窗位置
+  static const String kDesktopSmallWindowPosition =
+      "DesktopSmallWindowPosition";
+
   /// 哔哩哔哩cookie
   static const String kBilibiliCookie = "BilibiliCookie";
 
