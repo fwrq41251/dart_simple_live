@@ -486,7 +486,13 @@ class SettingsPage extends GetView<SettingsController> {
           focusNode: controller.versionFocusNode,
           title: "版本",
           subtitle: "v${Utils.packageInfo.version}",
-          onTap: ()=>{},
+          onTap: () => {},
+        ),
+        HighlightListTile(
+          focusNode: controller.diagnosticFocusNode,
+          title: "导出诊断报告",
+          subtitle: "生成脱敏的设备、网络、播放器状态与最近日志文件",
+          onTap: controller.exportDiagnosticReport,
         ),
       ],
     );

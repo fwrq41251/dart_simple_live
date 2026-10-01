@@ -39,6 +39,7 @@ dependencies:
 
   #系统交互
   package_info_plus: ^9.0.0 #包信息
+  path_provider: ^2.1.5
   url_launcher: ^6.3.2 #打开链接
   network_info_plus: ^7.0.0
   shelf: ^1.4.2

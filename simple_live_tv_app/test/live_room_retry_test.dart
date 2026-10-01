@@ -1,8 +1,10 @@
 // 验证 TV 端重试逻辑：播放地址失效 vs 房间确实下播
 // 对应修复：重试计数用尽后重新获取播放地址，而不是直接判定未开播。
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get/get.dart';
 import 'package:simple_live_tv_app/app/sites.dart';
 import 'package:simple_live_tv_app/modules/live_room/live_room_controller.dart';
+import 'package:simple_live_tv_app/services/diagnostic_service.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
@@ -100,6 +102,9 @@ void main() {
   setUp(() {
     // WakelockPlus 在测试环境无平台实现会抛异常并中断 mediaEnd/mediaError
     WakelockPlusPlatformInterface.instance = _NoopWakelock();
+    if (!Get.isRegistered<DiagnosticService>()) {
+      Get.put(DiagnosticService());
+    }
   });
 
   test('地址失效但平台仍给地址：重新获取成功，不误判未开播', () async {

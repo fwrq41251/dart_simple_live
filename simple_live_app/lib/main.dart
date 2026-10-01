@@ -27,6 +27,7 @@ import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/douyin_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/desktop_window_service.dart';
+import 'package:simple_live_app/services/diagnostic_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/services/sync_service.dart';
@@ -122,6 +123,7 @@ Future initServices() async {
   await Get.put(DBService()).init();
   //初始化设置控制器
   Get.put(AppSettingsController());
+  Get.put(DiagnosticService());
 
   Get.put(BiliBiliAccountService());
 
@@ -140,6 +142,10 @@ void initCoreLog() {
       !kReleaseMode || AppSettingsController.instance.logEnable.value;
   CoreLog.requestLogType = RequestLogType.short;
   CoreLog.onPrintLog = (level, msg) {
+    if (Get.isRegistered<DiagnosticService>() &&
+        (msg.contains('[HTTP Request]') || msg.contains('[HTTP Response]'))) {
+      DiagnosticService.instance.addEvent(msg);
+    }
     switch (level) {
       case Level.debug:
         Log.d(msg);

@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
+import 'package:simple_live_app/services/diagnostic_service.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
@@ -174,6 +175,7 @@ void main() {
     // onWSMessage 读取 AppSettingsController.shieldList，
     // 用跳过 Hive 初始化的子类注册，避免依赖本地存储。
     Get.put<AppSettingsController>(_StubSettings());
+    Get.put(DiagnosticService());
   });
 
   tearDown(Get.reset);

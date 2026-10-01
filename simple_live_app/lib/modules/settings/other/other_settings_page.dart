@@ -148,6 +148,26 @@ class OtherSettingsPage extends GetView<OtherSettingsController> {
             ),
           ),
           SettingsCard(
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: controller.copyDiagnosticReport,
+                    icon: const Icon(Remix.file_copy_line),
+                    label: const Text("复制诊断报告"),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: controller.exportDiagnosticReport,
+                    icon: const Icon(Remix.download_line),
+                    label: const Text("导出诊断报告"),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SettingsCard(
             child: Column(
               children: [
                 Obx(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -16,6 +17,7 @@ import 'package:simple_live_tv_app/models/db/follow_user.dart';
 import 'package:simple_live_tv_app/models/db/history.dart';
 import 'package:simple_live_tv_app/modules/live_room/player/player_controller.dart';
 import 'package:simple_live_tv_app/services/db_service.dart';
+import 'package:simple_live_tv_app/services/diagnostic_service.dart';
 import 'package:simple_live_tv_app/services/follow_user_service.dart';
 
 class LiveRoomController extends PlayerController with WidgetsBindingObserver {
@@ -148,6 +150,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       SmartDialog.showLoading(msg: "");
       pageLoadding.value = true;
       detail.value = await site.liveSite.getRoomDetail(roomId: roomId);
+      DiagnosticService.instance.updateRoom(
+        platform: site.name,
+        roomId: roomId,
+      );
 
       addHistory();
       online.value = detail.value!.online;
@@ -223,10 +229,27 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentQualityInfo.value = qualites[currentQuality].quality;
     currentLineInfo.value = "";
     currentLineIndex = -1;
-    var playUrl = await site.liveSite.getPlayUrls(
-      detail: detail.value!,
-      quality: qualites[currentQuality],
-    );
+    var stopwatch = Stopwatch()..start();
+    LivePlayUrl playUrl;
+    try {
+      playUrl = await site.liveSite.getPlayUrls(
+        detail: detail.value!,
+        quality: qualites[currentQuality],
+      );
+      DiagnosticService.instance.recordUrlRequest(
+        stopwatch.elapsed,
+        playUrl.urls.isEmpty ? '无可用地址' : '成功',
+      );
+    } on DioException catch (e) {
+      DiagnosticService.instance.recordUrlRequest(
+        stopwatch.elapsed,
+        'HTTP ${e.response?.statusCode ?? '未知'}',
+      );
+      rethrow;
+    } catch (_) {
+      DiagnosticService.instance.recordUrlRequest(stopwatch.elapsed, '失败');
+      rethrow;
+    }
     if (recoveryGeneration != null &&
         recoveryGeneration != _recoveryGeneration) {
       return false;
@@ -241,6 +264,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     playHeaders = playUrl.headers;
     currentLineIndex = 0;
     currentLineInfo.value = "线路${currentLineIndex + 1}";
+    _updateDiagnosticContext();
     await setPlayer();
     return true;
   }
@@ -248,7 +272,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   Future<void> changePlayLine(int index) async {
     _resetRecoveryState();
     currentLineIndex = index;
+    _updateDiagnosticContext();
     await setPlayer();
+  }
+
+  void _updateDiagnosticContext() {
+    DiagnosticService.instance.updateRoom(
+      platform: site.name,
+      roomId: roomId,
+      quality: currentQualityInfo.value,
+      line: "线路${currentLineIndex + 1}",
+    );
   }
 
   Future<void> setPlayer() async {
@@ -266,6 +300,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaEnd() {
     super.mediaEnd();
+    DiagnosticService.instance.recordRecovery('播放器报告流结束');
     unawaited(_recoverPlayback("播放结束", reloadCurrentUrl: site.id != "douyu"));
   }
 
@@ -273,6 +308,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaError(String error) {
     super.mediaError(error);
+    DiagnosticService.instance.recordPlayerError(error);
     unawaited(_recoverPlayback("播放失败:$error"));
   }
 
@@ -331,6 +367,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           mediaErrorRetryCount < 1) {
         mediaErrorRetryCount++;
         recoveryStatus.value = "正在重连";
+        DiagnosticService.instance.recordRecovery('重载当前线路');
         await setPlayer();
         return;
       }
@@ -359,11 +396,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       _awaitingStablePlayback = false;
       errorMsg.value = failMessage;
       recoveryStatus.value = "自动恢复停止，按确认键重试";
+      DiagnosticService.instance.recordRecovery('自动恢复停止');
       SmartDialog.showToast("$failMessage，自动恢复已停止，请手动刷新");
       return;
     }
     _freshUrlAttempts++;
     recoveryStatus.value = "切换线路（$_freshUrlAttempts/$_maxFreshUrlAttempts）";
+    DiagnosticService.instance.recordRecovery(
+      '重新获取地址 $_freshUrlAttempts/$_maxFreshUrlAttempts',
+    );
     if (_freshUrlAttempts > 1) {
       await Future.delayed(recoveryDelayFor(_freshUrlAttempts));
     }
@@ -413,6 +454,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     _stablePlaybackTimer = Timer(stablePlaybackDuration, () {
       if (_reportedPlaying && !isClosed) {
+        DiagnosticService.instance.recordRecovery('播放稳定');
         _resetRecoveryState();
       }
     });

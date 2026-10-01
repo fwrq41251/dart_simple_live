@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +23,7 @@ import 'package:simple_live_app/models/db/history.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controller.dart';
 import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/services/db_service.dart';
+import 'package:simple_live_app/services/diagnostic_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
@@ -310,6 +312,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         return;
       }
       detail.value = roomDetail;
+      DiagnosticService.instance.updateRoom(
+        platform: site.name,
+        roomId: roomId,
+      );
       if (site.id == Constant.kDouyin) {
         // 1.6.0之前收藏的WebRid
         // 1.6.0收藏的RoomID
@@ -456,8 +462,27 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentQualityInfo.value = qualites[currentQuality].quality;
     currentLineInfo.value = "";
     currentLineIndex = -1;
-    var playUrl = await site.liveSite
-        .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
+    var stopwatch = Stopwatch()..start();
+    LivePlayUrl playUrl;
+    try {
+      playUrl = await site.liveSite.getPlayUrls(
+        detail: detail.value!,
+        quality: qualites[currentQuality],
+      );
+      DiagnosticService.instance.recordUrlRequest(
+        stopwatch.elapsed,
+        playUrl.urls.isEmpty ? '无可用地址' : '成功',
+      );
+    } on DioException catch (e) {
+      DiagnosticService.instance.recordUrlRequest(
+        stopwatch.elapsed,
+        'HTTP ${e.response?.statusCode ?? '未知'}',
+      );
+      rethrow;
+    } catch (_) {
+      DiagnosticService.instance.recordUrlRequest(stopwatch.elapsed, '失败');
+      rethrow;
+    }
     if (!_isCurrentPlaybackGeneration(generation)) {
       return false;
     }
@@ -471,6 +496,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     playHeaders = playUrl.headers;
     currentLineIndex = 0;
     currentLineInfo.value = "线路${currentLineIndex + 1}";
+    DiagnosticService.instance.updateRoom(
+      platform: site.name,
+      roomId: roomId,
+      quality: currentQualityInfo.value,
+      line: currentLineInfo.value,
+    );
     //重置错误次数
     mediaErrorRetryCount = 0;
     await initPlaylist();
@@ -480,6 +511,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   Future<void> changePlayLine(int index) async {
     _resetRecoveryState();
     currentLineIndex = index;
+    DiagnosticService.instance.updateRoom(
+      platform: site.name,
+      roomId: roomId,
+      quality: currentQualityInfo.value,
+      line: "线路${index + 1}",
+    );
     await setPlayer();
   }
 
@@ -518,6 +555,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaEnd() {
     super.mediaEnd();
+    DiagnosticService.instance.recordRecovery('播放器报告流结束');
     // 斗鱼直播响应会在固定体积附近正常 EOF；此时旧签名地址已经失效，
     // 原地重载只会短暂恢复后再次结束，直接取新地址更快。
     unawaited(
@@ -533,6 +571,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaError(String error) {
     super.mediaError(error);
+    DiagnosticService.instance.recordPlayerError(error);
     unawaited(_recoverPlayback("播放失败:$error"));
   }
 
@@ -612,6 +651,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           mediaErrorRetryCount < 1) {
         mediaErrorRetryCount += 1;
         Log.d("播放中断，重载当前线路");
+        DiagnosticService.instance.recordRecovery('重载当前线路');
         await setPlayer();
         return;
       }
@@ -641,11 +681,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       _automaticRecoveryExhausted = true;
       _awaitingStablePlayback = false;
       errorMsg.value = failMessage;
+      DiagnosticService.instance.recordRecovery('自动恢复停止');
       SmartDialog.showToast("$failMessage，自动恢复已停止，请手动刷新");
       return;
     }
 
     _freshUrlAttempts += 1;
+    DiagnosticService.instance.recordRecovery(
+      '重新获取地址 $_freshUrlAttempts/$_maxFreshUrlAttempts',
+    );
     Log.d("播放地址可能已失效，重新获取（第$_freshUrlAttempts/$_maxFreshUrlAttempts 次）");
     if (_freshUrlAttempts > 1) {
       await Future.delayed(recoveryDelayFor(_freshUrlAttempts));
@@ -696,6 +740,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _stablePlaybackTimer = Timer(stablePlaybackDuration, () {
       if (_reportedPlaying && !_replaySuspended && !isClosed) {
         Log.d("播放已稳定，重置断流恢复状态");
+        DiagnosticService.instance.recordRecovery('播放稳定');
         _resetRecoveryState();
       }
     });

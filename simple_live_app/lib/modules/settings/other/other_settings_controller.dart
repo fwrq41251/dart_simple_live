@@ -12,6 +12,7 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:path/path.dart' as p;
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
+import 'package:simple_live_app/services/diagnostic_service.dart';
 
 class OtherSettingsController extends BaseController {
   RxList<LogFileModel> logFiles = <LogFileModel>[].obs;
@@ -150,6 +151,36 @@ class OtherSettingsController extends BaseController {
       var file = File(item.path);
       await file.copy(filePath);
       SmartDialog.showToast("保存成功");
+    }
+  }
+
+  Future<void> copyDiagnosticReport() async {
+    var report = await DiagnosticService.instance.buildReport();
+    Utils.copyToClipboard(report);
+    SmartDialog.showToast("诊断报告已复制");
+  }
+
+  Future<void> exportDiagnosticReport() async {
+    try {
+      var report = await DiagnosticService.instance.buildReport();
+      var bytes = Uint8List.fromList(utf8.encode(report));
+      var inlineSave = Platform.isAndroid || Platform.isIOS || kIsWeb;
+      var path = await FilePicker.platform.saveFile(
+        allowedExtensions: ['txt'],
+        type: FileType.custom,
+        fileName: 'simple_live_diagnostic.txt',
+        bytes: inlineSave ? bytes : null,
+      );
+      if (path == null && !kIsWeb) {
+        return;
+      }
+      if (!inlineSave && path != null) {
+        await File(path).writeAsBytes(bytes);
+      }
+      SmartDialog.showToast("诊断报告已导出");
+    } catch (e) {
+      Log.logPrint(e);
+      SmartDialog.showToast("导出失败:$e");
     }
   }
 
