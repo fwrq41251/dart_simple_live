@@ -1,17 +1,30 @@
 // ignore_for_file: must_call_super
 import 'dart:async';
+import 'dart:ui' as ui;
 
+import 'package:extended_image/extended_image.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/modules/replay/replay_controller.dart';
 import 'package:simple_live_app/modules/replay/replay_page.dart';
+import 'package:simple_live_app/modules/replay/replay_progress_bar.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
-class _ReplaySite extends LiveSite implements LiveReplayDanmakuSite {
+class _ReplaySite extends LiveSite
+    implements LiveReplayDanmakuSite, LiveReplayPreviewSite {
   int replayUrlCalls = 0;
   Completer<LiveReplayUrl>? pendingReplayUrl;
+  bool failPreview = false;
+
+  @override
+  Future<LiveReplayPreview> getReplayPreview({required String hashId}) async {
+    if (failPreview) throw Exception('preview unavailable');
+    return LiveReplayPreview(urls: ['https://preview.test/sheet.jpg']);
+  }
 
   @override
   String get id => 'douyu';
@@ -130,6 +143,134 @@ void main() {
   });
 
   tearDown(Get.reset);
+
+  test('预览接口失败不影响回放播放', () async {
+    final controller = Get.find<ReplayController>() as _TestReplayController;
+    controller.replaySite.failPreview = true;
+    await Future.wait([controller.loadReplayPreview(), controller.loadData()]);
+    expect(controller.preview.value, isNull);
+    expect(controller.openCount, 1);
+    expect(controller.loadError.value, isFalse);
+  });
+
+  testWidgets('预览按目标时间裁剪正确的单格，而不是相邻格或整张拼图', (tester) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawRect(
+        const Rect.fromLTWH(0, 0, 160, 100), Paint()..color = Colors.blue);
+    // 20:35 位于第二张图的第3行、第4列；行列互换会得到蓝色。
+    canvas.drawRect(
+        const Rect.fromLTWH(48, 20, 16, 10), Paint()..color = Colors.red);
+    final picture = recorder.endRecording();
+    late ui.Image sheet;
+    await tester.runAsync(() async => sheet = await picture.toImage(160, 100));
+    picture.dispose();
+    const url = 'https://preview.test/crop.jpg';
+    PaintingBinding.instance.imageCache.putIfAbsent(
+      ExtendedNetworkImageProvider(url, cache: true),
+      () => OneFrameImageStreamCompleter(Future.value(ImageInfo(image: sheet))),
+    );
+    final key = GlobalKey();
+    await tester.pumpWidget(MaterialApp(
+      home: RepaintBoundary(
+        key: key,
+        child: Scaffold(
+            body: Center(
+                child: SizedBox(
+          width: 400,
+          child: ReplayProgressBar(
+            position: Duration.zero,
+            duration: const Duration(seconds: 2000),
+            preview: LiveReplayPreview(urls: ['', url]),
+            onSeek: (_) {},
+            onInteraction: (_) {},
+          ),
+        ))),
+      ),
+    ));
+    final rect = tester.getRect(find.byType(Slider));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: rect.center);
+    await mouse.moveTo(
+        Offset(rect.left + 16 + (rect.width - 32) * .6175, rect.center.dy));
+    await tester.pumpAndSettle();
+    final label = tester.getRect(find.text('20:35'));
+    final boundary =
+        key.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final rendered = await boundary.toImage();
+      final pixels = (await rendered.toByteData())!.buffer.asUint8List();
+      final point =
+          boundary.globalToLocal(Offset(label.center.dx, label.top - 30));
+      final offset = (point.dy.floor() * rendered.width + point.dx.floor()) * 4;
+      expect(pixels.sublist(offset, offset + 4), [244, 67, 54, 255]);
+      rendered.dispose();
+    });
+    await mouse.removePointer();
+    await tester.pumpWidget(const SizedBox());
+    PaintingBinding.instance.imageCache.clear();
+  });
+
+  testWidgets('进度条悬停不 seek，拖动只在松手后跳转，无预览仍显示时间', (tester) async {
+    final seeks = <Duration>[];
+    final controller = Get.find<ReplayController>();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: 400,
+            child: ReplayProgressBar(
+              position: const Duration(seconds: 100),
+              duration: const Duration(seconds: 1000),
+              onSeek: seeks.add,
+              onInteraction: controller.setProgressInteraction,
+            ),
+          ),
+        ),
+      ),
+    ));
+    final rect = tester.getRect(find.byType(Slider));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset(rect.left, rect.center.dy));
+    await mouse.moveTo(rect.center);
+    await tester.pump();
+    expect(find.text('08:20'), findsOneWidget);
+    expect(seeks, isEmpty);
+    await tester.pump(const Duration(seconds: 5));
+    expect(controller.showControls.value, isTrue);
+    await mouse.removePointer();
+    await tester.pump();
+    expect(find.text('08:20'), findsNothing);
+
+    final touch = await tester.startGesture(
+      Offset(rect.left + 16 + (rect.width - 32) * 0.1, rect.center.dy),
+    );
+    await touch.moveTo(
+      Offset(rect.left + 16 + (rect.width - 32) * 0.75, rect.center.dy),
+    );
+    await tester.pump();
+    expect(seeks, isEmpty);
+    expect(find.text('12:30'), findsOneWidget);
+    await touch.up();
+    await tester.pump();
+    expect(seeks, [const Duration(seconds: 750)]);
+    expect(find.text('12:30'), findsNothing);
+    await tester.pump(const Duration(seconds: 4));
+    expect(controller.showControls.value, isFalse);
+
+    // 布局切换移除正在悬停的进度条后，控制栏恢复自动隐藏。
+    final anotherMouse =
+        await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await anotherMouse.addPointer(location: rect.center);
+    await anotherMouse.moveTo(rect.center + const Offset(1, 0));
+    await tester.pump();
+    expect(controller.showControls.value, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 4));
+    expect(controller.showControls.value, isFalse);
+    await anotherMouse.removePointer();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('宽屏使用播放器加信息侧栏且无布局溢出', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);

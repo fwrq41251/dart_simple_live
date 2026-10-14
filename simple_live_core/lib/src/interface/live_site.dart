@@ -128,3 +128,8 @@ abstract interface class LiveReplayDanmakuSite {
     required int startTime,
   });
 }
+
+/// 支持读取回放进度条预览的站点能力。
+abstract interface class LiveReplayPreviewSite {
+  Future<LiveReplayPreview> getReplayPreview({required String hashId});
+}

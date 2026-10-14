@@ -134,6 +134,39 @@ class LiveReplayUrl {
   LiveReplayUrl({required this.qualities, this.headers});
 }
 
+/// 按时间排列的预览拼图，每张为 10 × 10 格，每格覆盖 10 秒。
+class LiveReplayPreview {
+  final List<String> urls;
+
+  LiveReplayPreview({required this.urls});
+
+  /// 没有对应拼图时不显示画面；不将末尾或缺失图片映射到其他时间。
+  LiveReplayPreviewFrame? frameAt(Duration position) {
+    if (position.isNegative) return null;
+    final index = position.inSeconds ~/ 10;
+    final sheet = index ~/ 100;
+    if (sheet >= urls.length || urls[sheet].isEmpty) return null;
+    return LiveReplayPreviewFrame(
+      url: urls[sheet],
+      column: index % 10,
+      row: (index % 100) ~/ 10,
+    );
+  }
+}
+
+/// 一帧预览在拼图中的位置（行列从零开始）。
+class LiveReplayPreviewFrame {
+  final String url;
+  final int column;
+  final int row;
+
+  LiveReplayPreviewFrame({
+    required this.url,
+    required this.column,
+    required this.row,
+  });
+}
+
 /// 一条与回放时间轴绑定的弹幕。
 class LiveReplayDanmaku {
   /// 相对当前回放分段起点的时间（毫秒）。

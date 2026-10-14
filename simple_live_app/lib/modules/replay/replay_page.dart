@@ -9,6 +9,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/replay/replay_controller.dart';
+import 'package:simple_live_app/modules/replay/replay_progress_bar.dart';
 import 'package:simple_live_app/widgets/desktop_player_shortcuts.dart';
 
 /// 回放播放页
@@ -264,17 +265,13 @@ class ReplayPage extends GetView<ReplayController> {
               ),
               Expanded(
                 child: Obx(
-                  () => Slider(
-                    value: _sliderValue(),
-                    onChanged: (v) {
-                      controller.seekTo(
-                        Duration(
-                          milliseconds:
-                              (controller.duration.value.inMilliseconds * v)
-                                  .round(),
-                        ),
-                      );
-                    },
+                  () => ReplayProgressBar(
+                    position: controller.position.value,
+                    duration: controller.duration.value,
+                    preview: controller.preview.value,
+                    playerKey: controller.globalPlayerKey,
+                    onSeek: controller.seekTo,
+                    onInteraction: controller.setProgressInteraction,
                   ),
                 ),
               ),
@@ -345,15 +342,6 @@ class ReplayPage extends GetView<ReplayController> {
         ],
       ),
     );
-  }
-
-  double _sliderValue() {
-    var total = controller.duration.value.inMilliseconds;
-    if (total <= 0) {
-      return 0;
-    }
-    var current = controller.position.value.inMilliseconds;
-    return (current / total).clamp(0.0, 1.0);
   }
 
   Widget _buildSpeedButton() {

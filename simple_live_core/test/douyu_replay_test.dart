@@ -34,6 +34,41 @@ void main() {
       expect(site.supportReplay, isTrue);
     });
 
+    test('预览保留拼图次序，按十秒定位并正确跨越拼图边界', () async {
+      HttpClient.instance = MockHttpClient({
+        'getVideoUrl':
+            '{"error":0,"data":{"viewthumb":'
+            '[{"url":"first.jpg"},{"url":"second.jpg"},{},'
+            '{"url":"fourth.jpg"}]}}',
+      });
+      final preview = await site.getReplayPreview(hashId: 'test');
+      final first = preview.frameAt(const Duration(milliseconds: 9999))!;
+      expect([first.url, first.row, first.column], ['first.jpg', 0, 0]);
+      final next = preview.frameAt(const Duration(seconds: 10))!;
+      expect([next.row, next.column], [0, 1]);
+      final last = preview.frameAt(const Duration(milliseconds: 999999))!;
+      expect([last.url, last.row, last.column], ['first.jpg', 9, 9]);
+      final boundary = preview.frameAt(const Duration(seconds: 1000))!;
+      expect(
+        [boundary.url, boundary.row, boundary.column],
+        ['second.jpg', 0, 0],
+      );
+      final frame = preview.frameAt(const Duration(seconds: 1235))!;
+      expect([frame.url, frame.row, frame.column], ['second.jpg', 2, 3]);
+      expect(preview.frameAt(const Duration(seconds: 2000)), isNull);
+      expect(preview.frameAt(const Duration(seconds: 3000))!.url, 'fourth.jpg');
+      expect(preview.frameAt(const Duration(seconds: 4000)), isNull);
+      expect(preview.frameAt(const Duration(milliseconds: -1)), isNull);
+    });
+
+    test('回放没有预览时返回空预览', () async {
+      HttpClient.instance = MockHttpClient({
+        'getVideoUrl': '{"error":0,"data":{}}',
+      });
+      final preview = await site.getReplayPreview(hashId: 'test');
+      expect(preview.frameAt(Duration.zero), isNull);
+    });
+
     test('房间号解析为 hash 形式的 up_id', () async {
       final upId = await site.getReplayUpId('9999');
       // 必须是 hash，数字 uid 会被接口拒绝

@@ -20,7 +20,8 @@ import 'package:simple_live_core/src/model/live_replay.dart';
 import 'package:html_unescape/html_unescape.dart';
 import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 
-class DouyuSite implements LiveSite, LiveReplayDanmakuSite {
+class DouyuSite
+    implements LiveSite, LiveReplayDanmakuSite, LiveReplayPreviewSite {
   @override
   String id = "douyu";
 
@@ -568,6 +569,30 @@ class DouyuSite implements LiveSite, LiveReplayDanmakuSite {
     var order = List<int>.generate(qualities.length, (i) => i)
       ..sort((a, b) => levels[b].compareTo(levels[a]));
     return LiveReplayUrl(qualities: order.map((i) => qualities[i]).toList());
+  }
+
+  @override
+  Future<LiveReplayPreview> getReplayPreview({required String hashId}) async {
+    // 该接口返回 JSON，但 Content-Type 是 text/html，需显式解码。
+    final text = await HttpClient.instance.getText(
+      "https://v.douyu.com/video/video/getVideoUrl",
+      queryParameters: {"vid": hashId},
+      header: {
+        'user-agent': _kReplayUserAgent,
+        'referer': 'https://v.douyu.com/show/$hashId',
+      },
+    );
+    final result = jsonDecode(text);
+    if (result["error"] != 0) {
+      throw Exception(result["msg"]);
+    }
+    return LiveReplayPreview(
+      // 保留空项的位置，否则缺失拼图会让后续预览与时间错位。
+      urls: [
+        for (final item in (result["data"]?["viewthumb"] ?? []))
+          item["url"]?.toString() ?? "",
+      ],
+    );
   }
 
   @override

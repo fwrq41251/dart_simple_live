@@ -77,6 +77,21 @@ class ReplayController extends BaseController with WindowListener {
   /// 可用清晰度
   var qualities = <LiveReplayQuality>[].obs;
 
+  final preview = Rxn<LiveReplayPreview>();
+
+  Future<void> loadReplayPreview() async {
+    final liveSite = site.liveSite;
+    if (liveSite is! LiveReplayPreviewSite) return;
+    try {
+      final result = await (liveSite as LiveReplayPreviewSite)
+          .getReplayPreview(hashId: pItem.hashId);
+      if (!_closing) preview.value = result;
+    } catch (e) {
+      // 预览是可选能力，失败不能阻止播放或显示播放失败提示。
+      Log.d("回放预览加载失败：$e");
+    }
+  }
+
   /// 当前清晰度索引
   var currentQuality = (-1).obs;
 
@@ -139,6 +154,7 @@ class ReplayController extends BaseController with WindowListener {
     player.setVolume(AppSettingsController.instance.playerVolume.value);
     initStream();
     loadData();
+    unawaited(loadReplayPreview());
   }
 
   void initStream() {
@@ -630,10 +646,17 @@ class ReplayController extends BaseController with WindowListener {
     showControls.value = true;
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 4), () {
-      if (!_closing) {
+      if (!_closing && !_interactingWithProgress) {
         showControls.value = false;
       }
     });
+  }
+
+  bool _interactingWithProgress = false;
+
+  void setProgressInteraction(bool active) {
+    _interactingWithProgress = active;
+    showControlsTemporarily();
   }
 
   Future<void> toggleFullScreen() async {
