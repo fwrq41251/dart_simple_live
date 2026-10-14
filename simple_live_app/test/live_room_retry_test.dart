@@ -302,9 +302,42 @@ void main() {
     expect(c.mediaErrorRetryCount, 0);
   });
 
-  test('error 与 completed 同时触发时只运行一个恢复流程', () async {
+  test('缓冲期间不判定为播放稳定', () async {
+    // 真实日志：进入缓冲后 playing 仍为 true，旧逻辑满 10 秒就记「播放稳定」
+    // 并清零重试计数，导致失效地址的原地重载可以无限重复。
     var fake = FakeSite(urlsAvailable: true);
     var c = build(fake);
+
+    c.onPlayingChanged(true);
+    c.onBufferingChanged(true);
+
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
+    expect(c.mediaErrorRetryCount, 2, reason: '缓冲中不应清零重试计数');
+  });
+
+  test('退出缓冲并稳定播放后才重置重试状态', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = build(fake);
+
+    c.onPlayingChanged(true);
+    c.onBufferingChanged(true);
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
+    expect(c.mediaErrorRetryCount, 2);
+
+    c.onBufferingChanged(false);
+    await Future<void>.delayed(c.stablePlaybackDuration * 2);
+    expect(c.mediaErrorRetryCount, 0, reason: '退出缓冲后重新计时并清零');
+  });
+
+  test('error 与 completed 同时触发时只运行一个恢复流程', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    // 用非斗鱼站点验证「原地重载」这一级的去重：斗鱼会跳过重载直接取址，
+    // 那条路径由下面的斗鱼用例覆盖。
+    var c = TestController(
+      pSite: Site(id: 'bilibili', name: 'b', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
     c.mediaErrorRetryCount = 0;
     c.pendingJump = Completer<void>();
 
@@ -409,7 +442,7 @@ void main() {
   test('退避窗口过后的新断流仍会恢复', () async {
     var fake = FakeSite(urlsAvailable: true);
     var c = _BurstController(
-      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pSite: Site(id: 'bilibili', name: 'b', logo: '', liveSite: fake),
       pRoomId: '1',
     );
     seed(c);
@@ -446,9 +479,10 @@ void main() {
   test('单次断流最多一次原地重载，随后直接换地址', () async {
     // 旧实现是「2 次原地重载 + 逐条换线路 + 3 次换地址」，
     // 每级都会重建画面，用户看到的就是反复停顿。
+    // 斗鱼会跳过原地重载，这条梯度由非斗鱼站点验证。
     var fake = FakeSite(urlsAvailable: true);
     var c = TestController(
-      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pSite: Site(id: 'bilibili', name: 'b', logo: '', liveSite: fake),
       pRoomId: '1',
     );
     seed(c);
@@ -484,6 +518,42 @@ void main() {
     expect(c.playlistOpens, 1);
     expect(c.preservesCurrentFrame, isTrue,
         reason: '斗鱼断流恢复应避免完整 stop/clear/open');
+  });
+
+  test('斗鱼播放错误同样跳过失效旧地址并直接重新取址', () async {
+    // 真实日志：断流以 error（Failed to open / Failed to recognize file
+    // format）而非 EOF 上报时，旧逻辑先原地重载失效地址，要等 mpv 超时
+    // 约 20 秒才报错，画面一直冻着。error 路径必须和 EOF 路径一致。
+    var fake = FakeSite(urlsAvailable: true);
+    var c = TestController(
+      pSite: Site(id: 'douyu', name: 'd', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
+    c.mediaErrorRetryCount = 0;
+
+    c.mediaError('Failed to recognize file format.');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(c.playerJumps, 0, reason: '斗鱼 error 后不应重载带旧签名的地址');
+    expect(fake.fetchCount, 1, reason: '应直接重新取址');
+    expect(c.playlistOpens, 1);
+  });
+
+  test('非斗鱼播放错误仍保留一次原地重载', () async {
+    var fake = FakeSite(urlsAvailable: true);
+    var c = TestController(
+      pSite: Site(id: 'bilibili', name: 'b', logo: '', liveSite: fake),
+      pRoomId: '1',
+    );
+    seed(c);
+    c.mediaErrorRetryCount = 0;
+
+    c.mediaError('stream error');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(c.playerJumps, 1, reason: '非斗鱼仍先尝试原地重载');
+    expect(fake.fetchCount, 0);
   });
 
   test('斗鱼在断流前预取播放地址，恢复时不再等待接口', () async {

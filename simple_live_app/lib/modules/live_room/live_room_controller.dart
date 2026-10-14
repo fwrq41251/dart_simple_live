@@ -114,6 +114,14 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   LivePlayUrl? _prefetchedDouyuPlayUrl;
   DateTime? _prefetchedDouyuPlayUrlAt;
   int _douyuPlayUrlPrefetchGeneration = 0;
+  DouyuLiveStream? _douyuStream;
+  bool _douyuStreamFailed = false;
+
+  void _closeDouyuStream() {
+    final stream = _douyuStream;
+    _douyuStream = null;
+    if (stream != null) unawaited(stream.close());
+  }
 
   bool _isCurrentPlaybackGeneration(int generation) =>
       generation == _playbackGeneration && !_replaySuspended && !isClosed;
@@ -306,6 +314,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 加载直播间信息
   void loadData() async {
     var generation = ++_playbackGeneration;
+    _closeDouyuStream();
     try {
       showRoomLoading();
       loadError.value = false;
@@ -453,6 +462,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }) async {
     if (resetRecovery) {
       _resetRecoveryState();
+      _douyuStreamFailed = false;
     }
     var generation = _playbackGeneration;
     if (qualites.isEmpty ||
@@ -625,19 +635,92 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @protected
   bool get hasLoadedPlayerPlaylist => player.state.playlist.medias.isNotEmpty;
 
+  Future<Media> _prepareLiveMedia(Media media) async {
+    _closeDouyuStream();
+    if (site.liveSite is! DouyuSite || _douyuStreamFailed) return media;
+    final generation = _playbackGeneration;
+    final liveSite = site.liveSite;
+    final roomDetail = detail.value!;
+    final quality = qualites[currentQuality];
+    final lineIndex = currentLineIndex;
+    late final DouyuLiveStream stream;
+    stream = DouyuLiveStream(
+      initialUrl: LivePlayUrl(urls: [media.uri], headers: media.httpHeaders),
+      refreshUrls: () async {
+        if (!_isCurrentPlaybackGeneration(generation) ||
+            _douyuStream != stream) {
+          throw StateError('播放会话已结束');
+        }
+        final watch = Stopwatch()..start();
+        final cached = _takePrefetchedDouyuPlayUrl();
+        final urls = cached ??
+            await liveSite.getPlayUrls(
+              detail: roomDetail,
+              quality: quality,
+            );
+        if (!_isCurrentPlaybackGeneration(generation) ||
+            _douyuStream != stream) {
+          throw StateError('播放会话已结束');
+        }
+        DiagnosticService.instance.recordUrlRequest(
+          watch.elapsed,
+          cached == null ? '连续续流取址' : '续流预取缓存命中',
+        );
+        _scheduleDouyuPlayUrlPrefetch();
+        if (urls.urls.isEmpty) return urls;
+        var url = urls.urls[lineIndex.clamp(0, urls.urls.length - 1)];
+        if (AppSettingsController.instance.playerForceHttps.value) {
+          url = url.replaceAll('http://', 'https://');
+        }
+        return LivePlayUrl(urls: [url], headers: urls.headers);
+      },
+      onEvent: DiagnosticService.instance.recordRecovery,
+      onFailure: () {
+        if (_douyuStream != stream ||
+            !_isCurrentPlaybackGeneration(generation)) {
+          return;
+        }
+        _douyuStreamFailed = true;
+        // A loopback EOF is not always reported as completed by mpv. Hand off
+        // explicitly rather than waiting for the old buffer to run empty.
+        unawaited(_recoverPlayback('连续续流失败', reloadCurrentUrl: false));
+      },
+    );
+    _douyuStream = stream;
+    try {
+      final uri = await stream.start();
+      if (!_isCurrentPlaybackGeneration(generation) || _douyuStream != stream) {
+        await stream.close();
+        throw StateError('播放会话已结束');
+      }
+      // Local HTTP is intentionally not affected by force-HTTPS, and carries
+      // no upstream headers or credentials.
+      return Media(uri.toString());
+    } catch (_) {
+      if (_douyuStream == stream) {
+        _douyuStreamFailed = true;
+        _closeDouyuStream();
+        DiagnosticService.instance.recordRecovery('续流服务启动失败，使用直接播放');
+      }
+      return media;
+    }
+  }
+
   @protected
   Future<void> loadPlayerPlaylist(
     List<Media> mediaList, {
     required bool preserveCurrentFrame,
   }) async {
     var generation = _playbackGeneration;
+    final media = await _prepareLiveMedia(mediaList[currentLineIndex]);
+    if (!_isCurrentPlaybackGeneration(generation)) return;
     // 斗鱼恢复时保留当前 mpv 媒体，不调用 open() 内部的 stop/clear。
     // 新地址作为后续条目追加并推进，视频轨恢复后再删除失效条目。
     if (preserveCurrentFrame) {
       var oldLength = player.state.playlist.medias.length;
       _stalePlaylistEntries = oldLength;
       markRecoveryPlayerCommand('提交播放器无停机切换命令');
-      await player.add(mediaList[currentLineIndex]);
+      await player.add(media);
       if (!_isCurrentPlaybackGeneration(generation)) {
         return;
       }
@@ -655,7 +738,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     _stalePlaylistEntries = 0;
     markRecoveryPlayerCommand('提交播放器打开命令');
-    await player.open(mediaList[currentLineIndex]);
+    await player.open(media);
     _recordRecoveryTiming('播放器打开命令完成');
   }
 
@@ -668,8 +751,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       url = url.replaceAll("http://", "https://");
     }
     _stalePlaylistEntries = 0;
+    final generation = _playbackGeneration;
+    final media = await _prepareLiveMedia(Media(url, httpHeaders: playHeaders));
+    if (!_isCurrentPlaybackGeneration(generation)) return;
     await initializePlayer();
-    await player.open(Media(url, httpHeaders: playHeaders));
+    if (!_isCurrentPlaybackGeneration(generation)) return;
+    await player.open(media);
   }
 
   @override
@@ -692,7 +779,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void mediaError(String error) {
     super.mediaError(error);
     DiagnosticService.instance.recordPlayerError(error);
-    unawaited(_recoverPlayback("播放失败:$error"));
+    // 斗鱼地址带时效签名，原地重载同一地址只会再失败一次：重载后要等 mpv
+    // 自己超时报错（network-timeout 最长 60 秒），画面就一直冻着。EOF 路径
+    // 已经跳过这一步，error 路径必须一致。
+    unawaited(
+      _recoverPlayback(
+        "播放失败:$error",
+        reloadCurrentUrl: site.id != "douyu",
+      ),
+    );
   }
 
   /// 同一断流只允许一个恢复流程，避免 error/completed 重复触发重开。
@@ -700,6 +795,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   bool _awaitingStablePlayback = false;
   bool _automaticRecoveryExhausted = false;
   bool _reportedPlaying = false;
+  bool _playerBuffering = false;
   Timer? _stablePlaybackTimer;
   int _freshUrlAttempts = 0;
   static const int _maxFreshUrlAttempts = 3;
@@ -885,12 +981,24 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void onPlayingChanged(bool playing) {
     _reportedPlaying = playing;
+    _restartStablePlaybackTimer();
+  }
+
+  /// 重新开始「稳定播放」计时。
+  ///
+  /// 只有在真正播放且未缓冲时才会计时；任何一次缓冲进入/退出、暂停或恢复
+  /// 播放都会重新计时，避免把仍在缓冲的播放误判为稳定。
+  void _restartStablePlaybackTimer() {
     _stablePlaybackTimer?.cancel();
-    if (!playing || _replaySuspended || isClosed) {
+    _stablePlaybackTimer = null;
+    if (!_reportedPlaying || _playerBuffering || _replaySuspended || isClosed) {
       return;
     }
     _stablePlaybackTimer = Timer(stablePlaybackDuration, () {
-      if (_reportedPlaying && !_replaySuspended && !isClosed) {
+      if (_reportedPlaying &&
+          !_playerBuffering &&
+          !_replaySuspended &&
+          !isClosed) {
         Log.d("播放已稳定，重置断流恢复状态");
         DiagnosticService.instance.recordRecovery('播放稳定');
         _resetRecoveryState();
@@ -900,6 +1008,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   @override
   void onBufferingChanged(bool buffering) {
+    _playerBuffering = buffering;
+    // 缓冲时 playing 仍为 true，若不重算稳定计时，画面明明停着却会满 10 秒
+    // 被判为「播放稳定」，进而清零重试计数，让失效地址的重载无限重复。
+    _restartStablePlaybackTimer();
     if (_recoveryStopwatch == null) {
       return;
     }
@@ -1463,6 +1575,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _replaySuspended = true;
     _resetRecoveryState();
     _playbackGeneration++;
+    _closeDouyuStream();
     liveDanmaku.stop();
     await stopPlayerForReplay();
     await WakelockPlus.disable();
@@ -1501,6 +1614,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     rxSite.value = site;
     rxRoomId.value = roomId;
     _playbackGeneration++;
+    _closeDouyuStream();
 
     // 清除全部消息
     liveDanmaku.stop();
@@ -1585,6 +1699,7 @@ ${error?.toString()}
     _douyuPlayUrlPrefetchTimer?.cancel();
     _douyuPlayUrlPrefetchGeneration++;
     _replaySuspended = true;
+    _closeDouyuStream();
 
     liveDanmaku.stop();
     danmakuController = null;
